@@ -1,0 +1,29 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+venv/
+env/
+
+# Environment variables
+.env
+
+# Django database
+*.sqlite3
+
+# Logs
+*.log
+
+# VS Code and IDE configs
+.vscode/
+.idea/
+
+# Migrations (optional – only ignore if generated automatically)
+**/migrations/*.pyc
+**/migrations/__pycache__/
+
+# Static & media files (if auto-generated in dev)
+staticfiles/
+media/
