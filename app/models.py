@@ -1,4 +1,4 @@
-from mongoengine import Document, StringField, EmailField, BooleanField, DateTimeField, FileField
+from mongoengine import Document, StringField, EmailField, BooleanField, DateTimeField, FileField,ReferenceField,ListField,DictField,IntField
 from werkzeug.security import generate_password_hash, check_password_hash
 import phonenumbers
 from email_validator import validate_email, EmailNotValidError
@@ -83,4 +83,17 @@ class User(Document):
             raise ValueError("Full name must be at least 2 characters long")
 
 
-    
+class QuizAttempt(Document):
+    user=ReferenceField("User",required=True)
+    questions=ListField(DictField(),required=True)
+    user_answers = ListField(StringField())
+    score=IntField(required=True)
+    total=IntField(required=True)
+    difficulty=StringField(required=True)
+    question_type=StringField(required=True)
+    created_at=DateTimeField(default=datetime.utcnow)
+
+    meta={
+        'collection':'quiz_attempts',
+        'indexes': ['created_at']
+    }

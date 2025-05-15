@@ -370,3 +370,107 @@ class UserDetailView(APIView):
         
         except (DoesNotExist, ValidationError):
             return Response({"error": "User not found or invalid ID"}, status=status.HTTP_404_NOT_FOUND)
+
+
+
+class UserDashboardView(APIView):
+    def get(self, request ,pk):
+       try:
+            # Get user details
+            user = User.objects.get(id=pk)
+            if not user:
+                return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+            # Get user's quiz attempts
+            quiz_attempts = QuizAttempt.objects(user=user).order_by('-created_at')
+            
+            # Calculate statistics
+            total_attempts = quiz_attempts.count()
+            if total_attempts > 0:
+                average_score = sum(attempt.score for attempt in quiz_attempts) / total_attempts
+                best_score = max(attempt.score for attempt in quiz_attempts)
+                recent_scores = [{
+                    'score': attempt.score,
+                    'total': attempt.total,
+                    'difficulty': attempt.difficulty,
+                    'date': attempt.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                    'type': attempt.question_type
+                } for attempt in quiz_attempts[:5]]
+            else:
+                average_score = 0
+                best_score = 0
+                recent_scores = []
+
+            # Prepare response data
+            dashboard_data = {
+                'user_profile': {
+                    'full_name': user.full_name,
+                    'email': user.email,
+                    'phone_number': user.phone_number,
+                    'country_code': user.country_code,
+                    'profile_image': True if user.profile else False,
+                    'joined_date': user.created_at.strftime('%Y-%m-%d'),
+                    'last_login': user.last_login.strftime('%Y-%m-%d %H:%M:%S')
+                },
+                'quiz_statistics': {
+                    'total_attempts': total_attempts,
+                    'average_score': round(average_score, 2),
+                    'best_score': best_score,
+                    'recent_scores': recent_scores
+                },
+                'activity_summary': {
+                    'mcq_attempts': QuizAttempt.objects(user=user, question_type='mcq').count(),
+                    'true_false_attempts': QuizAttempt.objects(user=user, question_type='true_false').count(),
+                    'by_difficulty': {
+                        'easy': QuizAttempt.objects(user=user, difficulty='easy').count(),
+                        'medium': QuizAttempt.objects(user=user, difficulty='medium').count(),
+                        'hard': QuizAttempt.objects(user=user, difficulty='hard').count()
+                    }
+                }
+            }
+
+            return Response(dashboard_data, status=status.HTTP_200_OK)
+       except Exception as e:
+             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def put(self, request, user_id):
+        try:
+            user = User.objects.get(id=user_id)
+            if not user:
+                return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+            # Update user profile
+            data = request.data
+            if 'full_name' in data:
+                user.full_name = data['full_name']
+            if 'phone_number' in data:
+                user.phone_number = data['phone_number']
+            if 'country_code' in data:
+                user.country_code = data['country_code']
+            if 'email' in data:
+                user.email = data['email']
+            
+            # Handle profile image update
+            profile_image = request.FILES.get('profile')
+            if profile_image:
+                user.profile = profile_image
+
+            # Validate and save changes
+            user.clean()
+            user.save()
+
+            return Response({
+                "message": "Profile updated successfully",
+                "user": {
+                    "full_name": user.full_name,
+                    "email": user.email,
+                    "phone_number": user.phone_number,
+                    "country_code": user.country_code,
+                    "profile": True if user.profile else False
+                }
+            }, status=status.HTTP_200_OK)
+
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
