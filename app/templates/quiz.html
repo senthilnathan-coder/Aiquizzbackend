@@ -1,0 +1,83 @@
+{% load quiz_filters %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Quiz Generator</title>
+</head>
+<body>
+    <h1>Quiz Generator</h1>
+    
+    {% if error %}
+    <p><b>Error:</b> {{ error }}</p>
+    {% endif %}
+    
+    {% if not questions %}
+    <form method="POST" enctype="multipart/form-data">
+        {% csrf_token %}
+        <p>
+            <label>Text Content:</label><br>
+            <textarea name="content" rows="4" cols="50"></textarea>
+        </p>
+        <p>
+            <label>Image:</label><br>
+            <input type="file" name="image">
+        </p>
+        <p>
+            <label>Audio:</label><br>
+            <input type="file" name="audio">
+        </p>
+        <p>
+            <label>Video:</label><br>
+            <input type="file" name="video">
+        </p>
+        <p>
+            <input type="submit" value="Generate Quiz">
+        </p>
+    </form>
+    {% endif %}
+
+    {% if questions and not score %}
+    <form method="POST">
+        {% csrf_token %}
+        <input type="hidden" name="submitted" value="true">
+        
+        {% for question in questions %}
+        <div>
+            <p><b>Q{{ forloop.counter }}:</b> {{ question.question }}</p>
+            {% for option in question.options %}
+            <p>
+                <input type="radio" name="question_{{ forloop.parentloop.counter0 }}" value="{{ option }}">
+                {{ option }}
+            </p>
+            {% endfor %}
+        </div>
+        <hr>
+        {% endfor %}
+        
+        <p>
+            <input type="submit" value="Submit Answers">
+        </p>
+    </form>
+    {% endif %}
+
+    {% if score %}
+    <div>
+        <h2>Results</h2>
+        <p><b>Score: {{ score }} / {{ questions|length }}</b></p>
+        
+        {% for question in questions %}
+        <div>
+            <p><b>Q{{ forloop.counter }}:</b> {{ question.question }}</p>
+            <p>Your answer: {{ user_answers|index:forloop.counter0 }}</p>
+            <p>Correct answer: {{ question.answer }}</p>
+        </div>
+        <hr>
+        {% endfor %}
+        
+        <p>
+            <a href=".">Try Another Quiz</a>
+        </p>
+    </div>
+    {% endif %}
+</body>
+</html>
