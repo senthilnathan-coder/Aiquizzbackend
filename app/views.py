@@ -276,13 +276,13 @@ class SignupView(APIView):
             email = data.get('email')
             password = data.get('password')
             confirm_password = data.get('confirm_password')
+            profile_image = request.FILES.get('profile')
 
             # Check if required fields are present
-            if not all([full_name, phone_number, country_code, email, password, confirm_password]):
-                return Response({'error': 'All fields are required'}, status=status.HTTP_400_BAD_REQUEST)
+            if not all([full_name, phone_number, country_code, email, password, confirm_password, profile_image]):
+                return Response({'error': 'All fields including profile image are required'}, status=status.HTTP_400_BAD_REQUEST)
 
             # Check if user already exists
-            # In SignupView class
             if User.objects(email=email).first():
                 return Response({'error': 'useremail already registered'}, status=status.HTTP_400_BAD_REQUEST)
             
@@ -294,7 +294,8 @@ class SignupView(APIView):
                 full_name=full_name,
                 phone_number=phone_number,
                 country_code=country_code,
-                email=email
+                email=email,
+                profile=profile_image
             )
 
             try:
@@ -308,7 +309,8 @@ class SignupView(APIView):
                         'full_name': user.full_name,
                         'email': user.email,
                         'phone_number': user.phone_number,
-                        'country_code': user.country_code
+                        'country_code': user.country_code,
+                        'profile': True
                     }
                 }, status=status.HTTP_201_CREATED)
 
@@ -345,7 +347,8 @@ class SigninView(APIView):
                     'full_name': user.full_name,
                     'email': user.email,
                     'phone_number': user.phone_number,
-                    'country_code': user.country_code
+                    'country_code': user.country_code,
+                    'profile': True
                 }
             })
 
