@@ -14,7 +14,7 @@ from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-import os
+import os 
 TEMPLATE_DIR=os.path.join(BASE_DIR,'templates')
 
 
@@ -85,16 +85,67 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'AIgemini.wsgi.application'
 
+from mongoengine import connect
+from pymongo.errors import ServerSelectionTimeoutError
+import pymongo
+
+MONGODB_SETTINGS = {
+    'db': 'demo',
+    'host': 'localhost',
+    'port': 27017,
+    # 'username': 'your_user',
+    # 'password': 'your_password',
+    # 'authentication_source': 'admin',
+}
+
+try:
+
+    connect(
+        db=MONGODB_SETTINGS['db'],
+        host=MONGODB_SETTINGS['host'],
+        port=MONGODB_SETTINGS['port'],
+        # username=MONGODB_SETTINGS.get('username'),
+        # password=MONGODB_SETTINGS.get('password'),
+        # authentication_source=MONGODB_SETTINGS.get('authentication_source'),
+        serverSelectionTimeoutMS=3000  # Timeout in milliseconds
+    )
+    
+
+    client = pymongo.MongoClient(
+        host=MONGODB_SETTINGS['host'],
+        port=MONGODB_SETTINGS['port'],
+        serverSelectionTimeoutMS=3000
+    )
+    client.admin.command('ping')
+    print("✅ MongoDB connected successfully!")
+
+except ServerSelectionTimeoutError:
+    print("❌ MongoDB connection failed.")
+
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'djongo',
+        'NAME': MONGODB_SETTINGS['db'],
+        'CLIENT': {
+            'host': MONGODB_SETTINGS['host'],
+            'port': MONGODB_SETTINGS['port'],
+            # 'username': MONGODB_SETTINGS.get('username'),
+            # 'password': MONGODB_SETTINGS.get('password'),
+            # 'authSource': MONGODB_SETTINGS.get('authentication_source'),
+        }
+    }
+}
 
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
-}
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.sqlite3',
+#         'NAME': BASE_DIR / 'db.sqlite3',
+#     }
+# }
 
 
 # Password validation
