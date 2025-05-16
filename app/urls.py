@@ -6,4 +6,5 @@ urlpatterns = [
     path('signup/', SignupView.as_view(), name='signup'),
     path('signin/', SigninView.as_view(), name='signin'),
     path('get_datas/<str:pk>/', UserDetailView.as_view(), name='user-detail'),
+    path('userdashboard/<str:pk>/',UserDashboardView.as_view(),name='userdashboard')
 ]
