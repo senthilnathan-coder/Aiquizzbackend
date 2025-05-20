@@ -15,11 +15,16 @@ from app.models import *
 from mongoengine.errors import DoesNotExist, ValidationError
 from datetime import datetime,timedelta
 import cv2
-import whisper
+# import whisper
 # from pydub import AudioSegment
+from faster_whisper import WhisperModel
+from PyPDF2 import PdfReader
+from docx import Document
+from pptx import Presentation
 
 genai.configure(api_key=settings.GEMINI_API_KEY)
-whisper_model = whisper.load_model("base")
+whisper_model = WhisperModel("base", compute_type="float32")
+# whisper_model = whisper.load_model("base")
 
 # Helper functions remain unchanged
 def extract_frame(video_file):
@@ -51,9 +56,50 @@ def transcribe_audio(audio_file):
         tmp.write(audio_file.read())
         tmp_path = tmp.name
 
-    result = whisper_model.transcribe(tmp_path)
+    segments, info = whisper_model.transcribe(tmp_path, beam_size=5)
+    text = " ".join([segment.text for segment in segments])
+
     os.remove(tmp_path)
-    return result["text"]
+    return text
+
+def extract_word_text(word_file):
+    try:
+        doc = Document(word_file)
+        text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
+        if not text.strip():
+            raise ValueError("No text content found in Word document")
+        return text
+    except Exception as e:
+        raise Exception(f"Error extracting Word document text: {str(e)}")
+
+def extract_pdf_text(pdf_file):
+    try:
+        reader = PdfReader(pdf_file)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text() + "\n"
+        if not text.strip():
+            raise ValueError("No text content found in PDF document")
+        return text
+    except Exception as e:
+        raise Exception(f"Error extracting PDF text: {str(e)}")
+
+def extract_ppt_text(ppt_file):
+    try:
+        prs = Presentation(ppt_file)
+        text = ""
+        
+        # Extract text from all slides
+        for slide in prs.slides:
+            for shape in slide.shapes:
+                if hasattr(shape, "text"):
+                    text += shape.text + "\n"
+        
+        if not text.strip():
+            raise ValueError("No text content found in PowerPoint document")
+        return text
+    except Exception as e:
+        raise Exception(f"Error extracting PowerPoint text: {str(e)}")
 
 def parse_questions(response_text, question_type='mcq'):
     questions = []
@@ -138,7 +184,7 @@ class MultimodalQuizView(APIView):
     def get(self, request):
         return Response({
             'message': 'Please send a POST request with content to generate quiz',
-            'supported_content_types': ['text', 'image', 'audio', 'video'],
+            'supported_content_types': ['text', 'image', 'audio', 'video', 'pdf', 'word', 'ppt'],
             'difficulty_levels': ['easy', 'medium', 'hard'],
             'question_types': ['mcq', 'true_false']
         })
@@ -154,6 +200,9 @@ class MultimodalQuizView(APIView):
                 image = request.FILES.get('image')
                 audio = request.FILES.get('audio')
                 video = request.FILES.get('video')
+                pdf = request.FILES.get('pdf')
+                word = request.FILES.get('word')
+                ppt = request.FILES.get('ppt')  # Add PPT file handling
                 difficulty = request.POST.get('difficulty', 'medium')
                 question_type = request.POST.get('question_type', 'mcq')
             else:
@@ -161,12 +210,15 @@ class MultimodalQuizView(APIView):
                 image = None
                 audio = None
                 video = None
+                pdf = None
+                word = None
+                ppt = None
                 difficulty = request.data.get('difficulty', 'medium')
                 question_type = request.data.get('question_type', 'mcq')
 
-            if not any([content_text.strip(), image, audio, video]):
+            if not any([content_text.strip(), image, audio, video, pdf, word, ppt]):
                 return Response({
-                    'error': 'Please provide at least one type of content (text/image/audio/video)'
+                    'error': 'Please provide at least one type of content (text/image/audio/video/pdf/word/ppt)'
                 }, status=status.HTTP_400_BAD_REQUEST)
 
             if difficulty not in ['easy', 'medium', 'hard']:
@@ -239,6 +291,43 @@ class MultimodalQuizView(APIView):
                         "data": base64.b64encode(frame_data).decode()
                     }
                 })
+                
+            if pdf:
+                pdf_text = extract_pdf_text(pdf)
+                if pdf_text:
+                    content_text = pdf_text
+                    parts[0]["text"] = parts[0]["text"].replace("Text: ", f"Text: {content_text}")
+
+            if word:
+                try:
+                    word_text = extract_word_text(word)
+                    if word_text:
+                        content_text = word_text
+                        parts[0]["text"] = parts[0]["text"].replace("Text: ", f"Text: {content_text}")
+                    else:
+                        return Response({
+                            'error': 'Could not extract text from Word document'
+                        }, status=status.HTTP_400_BAD_REQUEST)
+                except Exception as e:
+                    return Response({
+                        'error': f'Error processing Word document: {str(e)}'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+            if ppt:
+                try:
+                    ppt_text = extract_ppt_text(ppt)
+                    if ppt_text:
+                        content_text = ppt_text
+                        parts[0]["text"] = parts[0]["text"].replace("Text: ", f"Text: {content_text}")
+                    else:
+                        return Response({
+                            'error': 'Could not extract text from PowerPoint document'
+                        }, status=status.HTTP_400_BAD_REQUEST)
+                except Exception as e:
+                    return Response({
+                        'error': f'Error processing PowerPoint document: {str(e)}'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
 
             # Generate questions
             model = genai.GenerativeModel("models/gemini-1.5-flash")
@@ -252,8 +341,13 @@ class MultimodalQuizView(APIView):
                 }, status=status.HTTP_400_BAD_REQUEST)
 
             # For answer submission and database storage
-            if is_multipart and request.POST.get('submitted'):
-                user_answers = [request.POST.get(f'question_{i}') for i in range(len(questions))]
+            if request.data.get('submitted') or (is_multipart and request.POST.get('submitted')):
+                user_answers = []
+                if is_multipart:
+                    user_answers = [request.POST.get(f'question_{i}') for i in range(len(questions))]
+                else:
+                    user_answers = request.data.get('user_answers', [])
+                
                 score = sum(1 for i, q in enumerate(questions) if user_answers[i] == q['answer'])
                 
                 # Create and save quiz attempt

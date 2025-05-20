@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     "corsheaders",
     'app',
+    'app2',
     'rest_framework',
 ]
 
@@ -201,3 +202,7 @@ CORS_ALLOW_METHODS = [
     'PUT',
 ]
 CORS_ALLOW_CREDENTIALS = True
+
+
+
+
