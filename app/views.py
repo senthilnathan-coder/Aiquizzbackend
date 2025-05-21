@@ -21,12 +21,40 @@ from faster_whisper import WhisperModel
 from PyPDF2 import PdfReader
 from docx import Document
 from pptx import Presentation
+from openpyxl import load_workbook
+import requests
+from bs4 import BeautifulSoup
 
 genai.configure(api_key=settings.GEMINI_API_KEY)
 whisper_model = WhisperModel("base", compute_type="float32")
 # whisper_model = whisper.load_model("base")
 
-# Helper functions remain unchanged
+def extract_url_text(url):
+    try:
+        # Send a GET request to the URL
+        response = requests.get(url)
+        response.raise_for_status()  # Raise an exception for bad status codes
+        
+        # Parse the HTML content
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Remove script and style elements
+        for script in soup(["script", "style"]):
+            script.decompose()
+        
+        # Get text content
+        text = soup.get_text(separator='\n')
+        
+        # Clean up the text
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        text = '\n'.join(lines)
+        
+        if not text.strip():
+            raise ValueError("No text content found in URL")
+        return text
+    except Exception as e:
+        raise Exception(f"Error extracting URL text: {str(e)}")
+
 def extract_frame(video_file):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
         tmp.write(video_file.read())
@@ -101,6 +129,24 @@ def extract_ppt_text(ppt_file):
     except Exception as e:
         raise Exception(f"Error extracting PowerPoint text: {str(e)}")
 
+def extract_excel_text(excel_file):
+    try:
+        workbook = load_workbook(excel_file)
+        text = ""
+        
+        # Extract text from all sheets
+        for sheet in workbook.worksheets:
+            for row in sheet.iter_rows():
+                for cell in row:
+                    if cell.value:
+                        text += str(cell.value) + "\n"
+        
+        if not text.strip():
+            raise ValueError("No text content found in Excel document")
+        return text
+    except Exception as e:
+        raise Exception(f"Error extracting Excel document text: {str(e)}")
+
 def parse_questions(response_text, question_type='mcq'):
     questions = []
     blocks = response_text.strip().split("Q")[1:]
@@ -112,7 +158,7 @@ def parse_questions(response_text, question_type='mcq'):
                 
                 if not lines:
                     continue
-                    
+                
                 # Extract question text more flexibly
                 question_text = lines[0]
                 if ':' in question_text:
@@ -184,7 +230,7 @@ class MultimodalQuizView(APIView):
     def get(self, request):
         return Response({
             'message': 'Please send a POST request with content to generate quiz',
-            'supported_content_types': ['text', 'image', 'audio', 'video', 'pdf', 'word', 'ppt'],
+            'supported_content_types': ['text', 'image', 'audio', 'video', 'pdf', 'word', 'ppt', 'excel', 'url'],
             'difficulty_levels': ['easy', 'medium', 'hard'],
             'question_types': ['mcq', 'true_false']
         })
@@ -203,6 +249,8 @@ class MultimodalQuizView(APIView):
                 pdf = request.FILES.get('pdf')
                 word = request.FILES.get('word')
                 ppt = request.FILES.get('ppt')  # Add PPT file handling
+                excel=request.FILES.get('excel')
+                url=request.POST.get('url')
                 difficulty = request.POST.get('difficulty', 'medium')
                 question_type = request.POST.get('question_type', 'mcq')
             else:
@@ -213,12 +261,14 @@ class MultimodalQuizView(APIView):
                 pdf = None
                 word = None
                 ppt = None
+                excel=None
+                url=request.data.get('url')
                 difficulty = request.data.get('difficulty', 'medium')
                 question_type = request.data.get('question_type', 'mcq')
 
-            if not any([content_text.strip(), image, audio, video, pdf, word, ppt]):
+            if not any([content_text.strip(), image, audio, video, pdf, word, ppt, excel, url]):
                 return Response({
-                    'error': 'Please provide at least one type of content (text/image/audio/video/pdf/word/ppt)'
+                    'error': 'Please provide at least one type of content (text/image/audio/video/pdf/word/ppt/excel/url)'
                 }, status=status.HTTP_400_BAD_REQUEST)
 
             if difficulty not in ['easy', 'medium', 'hard']:
@@ -327,6 +377,36 @@ class MultimodalQuizView(APIView):
                     return Response({
                         'error': f'Error processing PowerPoint document: {str(e)}'
                     }, status=status.HTTP_400_BAD_REQUEST)
+
+            if excel:
+                try:
+                    excel_text = extract_excel_text(excel)
+                    if excel_text:
+                        content_text = excel_text
+                        parts[0]["text"] = parts[0]["text"].replace("Text: ", f"Text: {content_text}")
+                    else:
+                        return Response({
+                            'error': 'Could not extract text from Excel document'
+                        }, status=status.HTTP_400_BAD_REQUEST)
+                except Exception as e:
+                    return Response({
+                        'error': f'Error processing Excel document: {str(e)}'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            
+            if url:
+                try:
+                    url_text=extract_url_text(url)
+                    if url_text:
+                        content_text= url_text
+                        parts[0]["text"]=parts[0]["text"].replace("Text:",f"Text:{content_text}")
+                    else:
+                        return Response({
+                                'error':'could not extract text from url'
+                            })
+                except Exception as e:
+                    return Response({
+                        'error':f'error processing url:{str(e)}'
+                    },status=status.HTTP_400_BAD_REQUEST)
 
 
             # Generate questions
@@ -850,3 +930,5 @@ class UserDashboardView(APIView):
 
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        
