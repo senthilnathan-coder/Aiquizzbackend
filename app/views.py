@@ -1,3 +1,4 @@
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -13,20 +14,21 @@ import razorpay
 from django.conf import settings
 from app.models import *
 from mongoengine.errors import DoesNotExist, ValidationError
-from datetime import datetime,timedelta
+from datetime import datetime, timedelta
 import cv2
-# import whisper
-# from pydub import AudioSegment
+import time
+import hmac
+import hashlib
+import requests
+from bs4 import BeautifulSoup
 from faster_whisper import WhisperModel
 from PyPDF2 import PdfReader
 from docx import Document
 from pptx import Presentation
 from openpyxl import load_workbook
-import requests
-from bs4 import BeautifulSoup
 
 genai.configure(api_key=settings.GEMINI_API_KEY)
-whisper_model = WhisperModel("base", compute_type="float32")
+whisper_model = WhisperModel("tiny", compute_type="float32",device="cpu")
 # whisper_model = whisper.load_model("base")
 
 def extract_url_text(url):
@@ -80,15 +82,52 @@ def extract_frame(video_file):
     os.remove(frame_path)
     return image_data, "image/jpeg"
 def transcribe_audio(audio_file):
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
-        tmp.write(audio_file.read())
-        tmp_path = tmp.name
+    try:
+        # Get the file extension from the original file
+        file_extension = os.path.splitext(audio_file.name)[1].lower()
+        if not file_extension:
+            file_extension = '.mp3'  # Default to mp3 if no extension
 
-    segments, info = whisper_model.transcribe(tmp_path, beam_size=5)
-    text = " ".join([segment.text for segment in segments])
+        # Create temp file with correct extension
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as tmp:
+            # Read in chunks to handle large files
+            for chunk in audio_file.chunks():
+                tmp.write(chunk)
+            tmp_path = tmp.name
 
-    os.remove(tmp_path)
-    return text
+        try:
+            # Transcribe with error handling
+            segments, info = whisper_model.transcribe(
+                tmp_path,
+                beam_size=5,
+                language=None,  # Auto-detect language
+                initial_prompt="This is a transcription of an audio file."
+            )
+            
+            if not segments:
+                raise ValueError("No speech detected in audio file")
+            
+            # Combine all segments with proper spacing
+            text = ""
+            for segment in segments:
+                text += segment.text + " "
+            
+            text = text.strip()
+            if not text:
+                raise ValueError("Transcription produced empty result")
+            
+            return text
+
+        except Exception as e:
+            raise Exception(f"Transcription failed: {str(e)}")
+
+        finally:
+            # Clean up temp file
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    except Exception as e:
+        raise Exception(f"Audio processing failed: {str(e)}")
 
 def extract_word_text(word_file):
     try:
@@ -165,7 +204,7 @@ def parse_questions(response_text, question_type='mcq'):
                     question_text = question_text.split(':', 1)[1].strip()
                 
                 # Handle MCQ format
-                if question_type == 'mcq':
+                if question_type.lower() == 'mcq':
                     options = []
                     answer_line = None
                     
@@ -189,7 +228,7 @@ def parse_questions(response_text, question_type='mcq'):
                             })
                 
                 # Handle True/False format
-                else:
+                elif question_type.lower() == 'true_false':
                     options = ['True', 'False']
                     answer_line = None
                     
@@ -200,23 +239,21 @@ def parse_questions(response_text, question_type='mcq'):
                             break
                     
                     if answer_line:
-                        answer_text = answer_line.split(':')[1].strip().upper()
-                        correct_index = None
+                        answer_text = answer_line.split(':')[1].strip().lower()
                         
-                        # Handle multiple answer formats
-                        if answer_text in ['A', 'TRUE', 'T']:
+                        # Simplified answer matching for true/false
+                        if answer_text in ['true', 't', 'a']:
                             correct_index = 0
-                        elif answer_text in ['B', 'FALSE', 'F']:
+                        elif answer_text in ['false', 'f', 'b']:
                             correct_index = 1
-                        elif answer_text[0] in ['A', 'B']:
-                            correct_index = ord(answer_text[0]) - ord('A')
+                        else:
+                            continue
                         
-                        if correct_index is not None and 0 <= correct_index < len(options):
-                            questions.append({
-                                'question': question_text,
-                                'options': options,
-                                'answer': options[correct_index]
-                            })
+                        questions.append({
+                            'question': question_text,
+                            'options': options,
+                            'answer': options[correct_index]
+                        })
             except Exception as block_error:
                 print(f"Error parsing block: {str(block_error)}")
                 continue
@@ -225,6 +262,138 @@ def parse_questions(response_text, question_type='mcq'):
         print(f"Error parsing questions: {str(e)}")
     
     return questions
+
+class PaymentView(APIView):
+    def get(self, request):
+        try:
+            user = request.user
+            payments = Payment.objects.filter(user=user).order_by('-payment_date')
+            
+            payment_data = [{
+                'transaction_id': payment.transaction_id,
+                'amount': payment.amount,
+                'status': payment.status,
+                'payment_date': payment.payment_date,
+                'attempts_remaining': payment.attempts_remaining
+            } for payment in payments]
+            
+            return Response({
+                'payments': payment_data
+            })
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def post(self, request):
+        try:
+            user = request.user
+            num_attempts = int(request.data.get('num_attempts', 1))
+            
+            if num_attempts < 1:
+                return Response({
+                    'error': 'Number of attempts must be at least 1'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Calculate amount (₹50 per attempt)
+            amount = num_attempts * 50
+            
+            # Generate unique transaction ID
+            transaction_id = f"QUIZ_{int(time.time())}_{user.id}"
+            
+            # Create payment record
+            payment = Payment(
+                user=user,
+                transaction_id=transaction_id,
+                amount=amount,
+                attempts_purchased=num_attempts,
+                attempts_remaining=num_attempts,
+                status='pending'
+            )
+            payment.save()
+            
+            # Generate PhonePe payload
+            payload = {
+                "merchantId": settings.PHONEPE_MERCHANT_ID,
+                "merchantTransactionId": transaction_id,
+                "amount": amount * 100,  # Amount in paise
+                "redirectUrl": f"{settings.SITE_URL}/payment/callback/",
+                "redirectMode": "POST",
+                "callbackUrl": f"{settings.SITE_URL}/payment/callback/",
+                "mobileNumber": user.phone_number,
+                "paymentInstrument": {
+                    "type": "PAY_PAGE"
+                }
+            }
+            
+            # Generate checksum
+            payload_str = json.dumps(payload)
+            encoded_payload = base64.b64encode(payload_str.encode()).decode()
+            salt_key = settings.PHONEPE_SALT
+            salt_index = 1
+            
+            string_to_hash = encoded_payload + "/pg/v1/pay" + salt_key
+            sha256_hash = hashlib.sha256(string_to_hash.encode()).hexdigest()
+            checksum = sha256_hash + "###" + str(salt_index)
+            
+            # Make request to PhonePe
+            headers = {
+                "Content-Type": "application/json",
+                "X-VERIFY": checksum
+            }
+            
+            phonepe_response = requests.post(
+                f"{settings.PHONEPE_API_URL}/pg/v1/pay",
+                json={
+                    "request": encoded_payload
+                },
+                headers=headers
+            )
+            
+            if phonepe_response.status_code == 200:
+                response_data = phonepe_response.json()
+                if response_data.get('success'):
+                    return Response({
+                        'payment_url': response_data['data']['instrumentResponse']['redirectInfo']['url'],
+                        'transaction_id': transaction_id
+                    })
+            
+            return Response({
+                'error': 'Payment initiation failed'
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class PaymentCallbackView(APIView):
+    def post(self, request):
+        try:
+            # Verify callback signature
+            callback_data = request.data
+            signature = request.headers.get('X-VERIFY')
+            
+            if not signature:
+                return Response({'error': 'Invalid callback'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Verify signature
+            salt_key = settings.PHONEPE_SALT
+            string_to_hash = callback_data['response'] + salt_key
+            computed_hash = hashlib.sha256(string_to_hash.encode()).hexdigest()
+            
+            if computed_hash != signature.split('###')[0]:
+                return Response({'error': 'Invalid signature'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Process payment response
+            response_data = json.loads(base64.b64decode(callback_data['response']))
+            transaction_id = response_data['merchantTransactionId']
+            
+            payment = Payment.objects.get(transaction_id=transaction_id)
+            payment.status = 'success' if response_data['code'] == 'PAYMENT_SUCCESS' else 'failed'
+            payment.payment_date = datetime.now()
+            payment.save()
+            
+            return Response({'status': 'success'})
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class MultimodalQuizView(APIView):
     def get(self, request):
@@ -237,7 +406,20 @@ class MultimodalQuizView(APIView):
 
     def post(self, request):
         try:
-            # Handle multipart form data or JSON
+            # Check for valid payment first
+            # user = request.user
+            # valid_payment = Payment.objects.filter(
+            #     user=user,
+            #     status='success',
+            #     attempts_remaining__gt=0
+            # ).first()
+            
+            # if not valid_payment:
+            #     return Response({
+            #         'error': 'No valid payment found. Please purchase quiz attempts.'
+            #     }, status=status.HTTP_402_PAYMENT_REQUIRED)
+
+            # # Handle multipart form data or JSON
             content_type = request.headers.get('Content-Type', '')
             is_multipart = 'multipart/form-data' in content_type.lower()
 
@@ -248,9 +430,9 @@ class MultimodalQuizView(APIView):
                 video = request.FILES.get('video')
                 pdf = request.FILES.get('pdf')
                 word = request.FILES.get('word')
-                ppt = request.FILES.get('ppt')  # Add PPT file handling
-                excel=request.FILES.get('excel')
-                url=request.POST.get('url')
+                ppt = request.FILES.get('ppt')
+                excel = request.FILES.get('excel')
+                url = request.POST.get('url')
                 difficulty = request.POST.get('difficulty', 'medium')
                 question_type = request.POST.get('question_type', 'mcq')
             else:
@@ -261,8 +443,8 @@ class MultimodalQuizView(APIView):
                 pdf = None
                 word = None
                 ppt = None
-                excel=None
-                url=request.data.get('url')
+                excel = None
+                url = request.data.get('url')
                 difficulty = request.data.get('difficulty', 'medium')
                 question_type = request.data.get('question_type', 'mcq')
 
@@ -330,8 +512,21 @@ class MultimodalQuizView(APIView):
                 })
 
             if audio:
-                transcribed = transcribe_audio(audio)
-                parts.append({"text": f"Transcribed audio: {transcribed}"})
+                try:
+                    transcribed = transcribe_audio(audio)
+                    if not transcribed:
+                        return Response({
+                            'error': 'Could not transcribe audio file'
+                        }, status=status.HTTP_400_BAD_REQUEST)
+                    
+                    content_text = transcribed
+                    parts[0]["text"] = parts[0]["text"].replace("Text: ", f"Text: {content_text}")
+                    parts.append({"text": f"Additional context from audio: {transcribed}"})
+                    
+                except Exception as e:
+                    return Response({
+                        'error': f'Error processing audio: {str(e)}'
+                    }, status=status.HTTP_400_BAD_REQUEST)
 
             if video:
                 frame_data, mime = extract_frame(video)
@@ -395,19 +590,18 @@ class MultimodalQuizView(APIView):
             
             if url:
                 try:
-                    url_text=extract_url_text(url)
+                    url_text = extract_url_text(url)
                     if url_text:
-                        content_text= url_text
-                        parts[0]["text"]=parts[0]["text"].replace("Text:",f"Text:{content_text}")
+                        content_text = url_text
+                        parts[0]["text"] = parts[0]["text"].replace("Text:", f"Text:{content_text}")
                     else:
                         return Response({
-                                'error':'could not extract text from url'
-                            })
+                            'error': 'Could not extract text from URL'
+                        })
                 except Exception as e:
                     return Response({
-                        'error':f'error processing url:{str(e)}'
-                    },status=status.HTTP_400_BAD_REQUEST)
-
+                        'error': f'Error processing URL: {str(e)}'
+                    }, status=status.HTTP_400_BAD_REQUEST)
 
             # Generate questions
             model = genai.GenerativeModel("models/gemini-1.5-flash")
@@ -440,7 +634,11 @@ class MultimodalQuizView(APIView):
                     difficulty=difficulty,
                     question_type=question_type
                 )
-                quiz_attempt.save()  # This triggers calculate_stats() method
+                quiz_attempt.save()
+                
+                # Decrement attempts_remaining
+                # valid_payment.attempts_remaining -= 1
+                # valid_payment.save()
                 
                 return Response({
                     'questions': questions,
@@ -448,14 +646,16 @@ class MultimodalQuizView(APIView):
                     'score': score,
                     'total': len(questions),
                     'difficulty': difficulty,
-                    'question_type': question_type
+                    'question_type': question_type,
+                    # 'attempts_remaining': valid_payment.attempts_remaining
                 })
 
             return Response({
                 'success': True,
                 'questions': questions,
                 'difficulty': difficulty,
-                'question_type': question_type
+                'question_type': question_type,
+                # 'attempts_remaining': valid_payment.attempts_remaining
             })
 
         except Exception as e:
@@ -566,369 +766,100 @@ class UserDetailView(APIView):
         
         except (DoesNotExist, ValidationError):
             return Response({"error": "User not found or invalid ID"}, status=status.HTTP_404_NOT_FOUND)
-
-
-
-# class UserDashboardView(APIView):
-#     def get(self, request ,pk):
-#        try:
-#             # Get user details
-#             user = User.objects.get(id=pk)
-#             if not user:
-#                 return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-
-#             # Get user's quiz attempts
-#             quiz_attempts = QuizAttempt.objects(user=user).order_by('-created_at')
-            
-#             # Calculate statistics
-#             total_attempts = quiz_attempts.count()
-#             if total_attempts > 0:
-#                 average_score = sum(attempt.score for attempt in quiz_attempts) / total_attempts
-#                 best_score = max(attempt.score for attempt in quiz_attempts)
-#                 recent_scores = [{
-#                     'score': attempt.score,
-#                     'total': attempt.total,
-#                     'difficulty': attempt.difficulty,
-#                     'date': attempt.created_at.strftime('%Y-%m-%d %H:%M:%S'),
-#                     'type': attempt.question_type
-#                 } for attempt in quiz_attempts[:5]]
-#             else:
-#                 average_score = 0
-#                 best_score = 0
-#                 recent_scores = []
-
-#             # Prepare response data
-#             dashboard_data = {
-#                 'user_profile': {
-#                     'full_name': user.full_name,
-#                     'email': user.email,
-#                     'phone_number': user.phone_number,
-#                     'country_code': user.country_code,
-#                     'profile_image': True if user.profile else False,
-#                     'joined_date': user.created_at.strftime('%Y-%m-%d'),
-#                     'last_login': user.last_login.strftime('%Y-%m-%d %H:%M:%S')
-#                 },
-#                 'quiz_statistics': {
-#                     'total_attempts': total_attempts,
-#                     'average_score': round(average_score, 2),
-#                     'best_score': best_score,
-#                     'recent_scores': recent_scores
-#                 },
-#                 'activity_summary': {
-#                     'mcq_attempts': QuizAttempt.objects(user=user, question_type='mcq').count(),
-#                     'true_false_attempts': QuizAttempt.objects(user=user, question_type='true_false').count(),
-#                     'by_difficulty': {
-#                         'easy': QuizAttempt.objects(user=user, difficulty='easy').count(),
-#                         'medium': QuizAttempt.objects(user=user, difficulty='medium').count(),
-#                         'hard': QuizAttempt.objects(user=user, difficulty='hard').count()
-#                     }
-#                 }
-#             }
-
-#             return Response(dashboard_data, status=status.HTTP_200_OK)
-#        except Exception as e:
-#              return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
-#     def put(self, request, pk):
-#         try:
-#             user = User.objects.get(id=pk)
-#             if not user:
-#                 return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-
-#             # Update user profile
-#             data = request.data
-#             if 'full_name' in data:
-#                 user.full_name = data['full_name']
-#             if 'phone_number' in data:
-#                 user.phone_number = data['phone_number']
-#             if 'country_code' in data:
-#                 user.country_code = data['country_code']
-#             if 'email' in data:
-#                 user.email = data['email']
-            
-#             # Handle profile image update
-#             profile_image = request.FILES.get('profile')
-#             if profile_image:
-#                 user.profile = profile_image
-
-#             # Validate and save changes
-#             user.clean()
-#             user.save()
-
-#             return Response({
-#                 "message": "Profile updated successfully",
-#                 "user": {
-#                     "full_name": user.full_name,
-#                     "email": user.email,
-#                     "phone_number": user.phone_number,
-#                     "country_code": user.country_code,
-#                     "profile": True if user.profile else False
-#                 }
-#             }, status=status.HTTP_200_OK)
-
-#         except ValueError as e:
-#             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-#         except Exception as e:
-#             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        
 class UserDashboardView(APIView):
     def get(self, request, pk):
         try:
-            # Get user details
-            user = User.objects.get(id=pk)
-            if not user:
-                return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-
-            # Get user's quiz attempts
-            quiz_attempts = QuizAttempt.objects(user=user).order_by('-created_at')
+            # Get user by pk
+            user = User.objects.get(pk=pk)
             
-            # Get streak information
-            streak = UserStreak.objects(user=user).first()
+            # Get or create user stats
+            try:
+                streak = UserStreak.objects.get(user=user)
+            except UserStreak.DoesNotExist:
+                streak = UserStreak(user=user).save()
+                
+            try:
+                points = UserPoints.objects.get(user=user)
+            except UserPoints.DoesNotExist:
+                points = UserPoints(user=user).save()
             
-            # Get points information
-            points = UserPoints.objects(user=user).first()
+            # Get recent quiz attempts
+            recent_attempts = QuizAttempt.objects.filter(user=user).order_by('-created_at')[:5]
             
-            # Get subscription details
-            subscription = Subscription.objects(user=user, is_active=True).first()
+            # Get active payments
+            # active_payments = Payment.objects.filter(
+            #     user=user,
+            #     status='success'
+            # ).order_by('-payment_date')
+            
+            # Calculate quiz statistics
+            total_attempts = QuizAttempt.objects.filter(user=user).count()
+            avg_accuracy = QuizAttempt.objects.filter(user=user).average('accuracy')
+            
+            # Get weak topics
+            weak_topics = set()
+            for attempt in recent_attempts:
+                weak_topics.update(attempt.weak_topics)
             
             # Get saved quizzes
-            saved_quizzes = SavedQuiz.objects(user=user).order_by('-saved_at')
+            saved_quizzes = SavedQuiz.objects.filter(user=user).order_by('-saved_at')[:5]
             
-            # Get payment history
-            payments = Payment.objects(user=user).order_by('-payment_date')
+            # Get recent feedback
+            recent_feedback = Feedback.objects.filter(user=user).order_by('-created_at')[:3]
             
-            # Get feedback history
-            feedback = Feedback.objects(user=user).order_by('-created_at')
-            
-            # Calculate statistics and learning curve
-            total_attempts = quiz_attempts.count()
-            if total_attempts > 0:
-                # Calculate average scores over time for learning curve
-                learning_curve = [{
-                    'date': attempt.created_at.strftime('%Y-%m-%d'),
-                    'score': attempt.score,
-                    'accuracy': attempt.accuracy,
-                    'moving_avg': sum(qa.accuracy for qa in quiz_attempts[max(0, i-4):i+1])/min(5, i+1)
-                } for i, attempt in enumerate(quiz_attempts)]
-                
-                # Calculate overall statistics
-                average_score = sum(attempt.score for attempt in quiz_attempts) / total_attempts
-                best_score = max(attempt.score for attempt in quiz_attempts)
-                
-                # Get recent scores with detailed stats
-                recent_scores = [{
-                    'score': attempt.score,
-                    'total': attempt.total,
-                    'difficulty': attempt.difficulty,
-                    'date': attempt.created_at.strftime('%Y-%m-%d %H:%M:%S'),
-                    'type': attempt.question_type,
-                    'accuracy': attempt.accuracy,
-                    'points_earned': attempt.points_earned,
-                    'topics': attempt.topics,
-                    'weak_topics': attempt.weak_topics,
-                    'rank': attempt.rank,
-                    'percentile': attempt.percentile,
-                    'review_notes': attempt.review_notes
-                } for attempt in quiz_attempts[:10]]
-                
-                # Identify overall weak topics
-                topic_accuracies = {}
-                for attempt in quiz_attempts:
-                    for topic in attempt.topics:
-                        if topic not in topic_accuracies:
-                            topic_accuracies[topic] = {'total': 0, 'correct': 0}
-                        topic_accuracies[topic]['total'] += 1
-                        if topic not in attempt.weak_topics:
-                            topic_accuracies[topic]['correct'] += 1
-                
-                weak_topics = [
-                    {'topic': topic, 'accuracy': (stats['correct']/stats['total']*100)}
-                    for topic, stats in topic_accuracies.items()
-                    if (stats['correct']/stats['total']*100) < 60
-                ]
-            else:
-                learning_curve = []
-                average_score = 0
-                best_score = 0
-                recent_scores = []
-                weak_topics = []
-
-            # Prepare response data
             dashboard_data = {
-                'user_profile': {
+                'user_info': {
+                    'id': str(user.pk),
                     'full_name': user.full_name,
                     'email': user.email,
-                    'phone_number': user.phone_number,
-                    'country_code': user.country_code,
-                    'profile_image': True if user.profile else False,
-                    'joined_date': user.created_at.strftime('%Y-%m-%d'),
-                    'last_login': user.last_login.strftime('%Y-%m-%d %H:%M:%S')
+                    'joined_date': user.created_at
                 },
                 'streak_info': {
-                    'current_streak': streak.current_streak if streak else 0,
-                    'longest_streak': streak.longest_streak if streak else 0,
-                    'last_quiz_date': streak.last_quiz_date.strftime('%Y-%m-%d') if streak and streak.last_quiz_date else None,
-                    'streak_history': streak.streak_history if streak else []
+                    'current_streak': streak.current_streak,
+                    'longest_streak': streak.longest_streak,
+                    'last_quiz_date': streak.last_quiz_date
                 },
                 'points_info': {
-                    'total_points': points.total_points if points else 0,
-                    'level': points.level if points else 1,
-                    'points_history': points.points_history if points else []
+                    'total_points': points.total_points,
+                    'level': points.level,
+                    'points_history': points.points_history[-5:]
                 },
-                'subscription_info': {
-                    'plan_name': subscription.plan_name if subscription else 'Free',
-                    'credits': subscription.credits if subscription else 0,
-                    'valid_until': subscription.end_date.strftime('%Y-%m-%d') if subscription else None,
-                    'is_active': subscription.is_active if subscription else False
-                },
-                'quiz_statistics': {
+                'quiz_stats': {
                     'total_attempts': total_attempts,
-                    'average_score': round(average_score, 2),
-                    'best_score': best_score,
-                    'recent_scores': recent_scores,
-                    'learning_curve': learning_curve,
-                    'weak_topics': weak_topics
+                    'average_accuracy': round(avg_accuracy, 2) if avg_accuracy else 0,
+                    'recent_attempts': [{
+                        'date': attempt.created_at,
+                        'score': attempt.score,
+                        'accuracy': attempt.accuracy,
+                        'difficulty': attempt.difficulty
+                    } for attempt in recent_attempts],
+                    'weak_topics': list(weak_topics)
                 },
+                # 'payment_info': [{
+                #     'transaction_id': payment.transaction_id,
+                #     'amount': payment.amount,
+                #     'status': payment.status,
+                #     'payment_date': payment.payment_date
+                # } for payment in active_payments],
                 'saved_quizzes': [{
-                    'quiz_id': str(sq.quiz_attempt.id),
-                    'saved_at': sq.saved_at.strftime('%Y-%m-%d %H:%M:%S'),
-                    'notes': sq.notes,
-                    'score': sq.quiz_attempt.score,
-                    'total': sq.quiz_attempt.total,
-                    'topics': sq.quiz_attempt.topics
-                } for sq in saved_quizzes],
-                'payment_history': [{
-                    'transaction_id': payment.transaction_id,
-                    'amount': payment.amount,
-                    'date': payment.payment_date.strftime('%Y-%m-%d %H:%M:%S'),
-                    'status': payment.status,
-                    'plan_name': payment.subscription.plan_name if payment.subscription else None,
-                    'invoice_url': payment.invoice_url
-                } for payment in payments],
-                'feedback_history': [{
-                    'type': f.type,
-                    'title': f.title,
-                    'description': f.description,
-                    'status': f.status,
-                    'created_at': f.created_at.strftime('%Y-%m-%d %H:%M:%S')
-                } for f in feedback],
-                'activity_summary': {
-                    'mcq_attempts': QuizAttempt.objects(user=user, question_type='mcq').count(),
-                    'true_false_attempts': QuizAttempt.objects(user=user, question_type='true_false').count(),
-                    'by_difficulty': {
-                        'easy': QuizAttempt.objects(user=user, difficulty='easy').count(),
-                        'medium': QuizAttempt.objects(user=user, difficulty='medium').count(),
-                        'hard': QuizAttempt.objects(user=user, difficulty='hard').count()
-                    }
-                }
+                    'quiz_id': str(saved.quiz_attempt.id),
+                    'saved_at': saved.saved_at,
+                    'notes': saved.notes
+                } for saved in saved_quizzes],
+                'recent_feedback': [{
+                    'title': feedback.title,
+                    'type': feedback.type,
+                    'status': feedback.status,
+                    'created_at': feedback.created_at
+                } for feedback in recent_feedback]
             }
-
-            return Response(dashboard_data, status=status.HTTP_200_OK)
-
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    def post(self, request, pk):
-        try:
-            user = User.objects.get(id=pk)
-            if not user:
-                return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-
-            action = request.data.get('action')
-            if action == 'create_payment':
-                amount = request.data.get('amount')
-                if not amount:
-                    return Response({'error': 'Amount is required'}, status=status.HTTP_400_BAD_REQUEST)
-
-                # Initialize Razorpay client
-                client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
-
-                # Create Razorpay order
-                order_data = {
-                    'amount': int(float(amount) * 100),  # Convert to paise
-                    'currency': 'INR',
-                    'receipt': f'order_{pk}_{datetime.now().timestamp()}',
-                    'payment_capture': 1
-                }
-                order = client.order.create(data=order_data)
-
-                # Create Payment record
-                payment = Payment(
-                    user=user,
-                    amount=float(amount),
-                    transaction_id=order['id'],
-                    status='pending'
-                ).save()
-
-                return Response({
-                    'order_id': order['id'],
-                    'amount': amount,
-                    'key_id': settings.RAZORPAY_KEY_ID
-                })
-
-            elif action == 'verify_payment':
-                payment_id = request.data.get('razorpay_payment_id')
-                order_id = request.data.get('razorpay_order_id')
-                signature = request.data.get('razorpay_signature')
-
-                # Verify signature
-                client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
-                try:
-                    client.utility.verify_payment_signature({
-                        'razorpay_payment_id': payment_id,
-                        'razorpay_order_id': order_id,
-                        'razorpay_signature': signature
-                    })
-                except:
-                    return Response({'error': 'Invalid payment signature'}, 
-                                  status=status.HTTP_400_BAD_REQUEST)
-
-                # Update payment status
-                payment = Payment.objects.get(transaction_id=order_id)
-                payment.status = 'completed'
-                payment.save()
-
-                # If this is a subscription payment, activate the subscription
-                if 'plan_name' in request.data:
-                    subscription = Subscription(
-                        user=user,
-                        plan_name=request.data['plan_name'],
-                        credits=request.data.get('credits', 0),
-                        end_date=datetime.now() + timedelta(days=30),  # Adjust based on plan
-                        is_active=True
-                    ).save()
-                    payment.subscription = subscription
-                    payment.save()
-
-                return Response({'status': 'Payment successful'})
-
-            elif action == 'save_quiz':
-                quiz_id = request.data.get('quiz_id')
-                notes = request.data.get('notes')
-                
-                quiz_attempt = QuizAttempt.objects.get(id=quiz_id)
-                SavedQuiz(user=user, quiz_attempt=quiz_attempt, notes=notes).save()
-                return Response({'status': 'Quiz saved successfully'})
-
-            elif action == 'submit_feedback':
-                feedback_type = request.data.get('type')
-                title = request.data.get('title')
-                description = request.data.get('description')
-                
-                Feedback(
-                    user=user,
-                    type=feedback_type,
-                    title=title,
-                    description=description
-                ).save()
-                return Response({'status': 'Feedback submitted successfully'})
-
-            else:
-                return Response({'error': 'Invalid action'}, 
-                              status=status.HTTP_400_BAD_REQUEST)
-
+            
+            return Response(dashboard_data)
+            
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-        
+    

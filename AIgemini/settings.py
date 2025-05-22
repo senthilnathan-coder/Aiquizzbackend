@@ -54,23 +54,14 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:5174",
 ]
 
-CORS_ALLOW_CREDENTIALS = True
 
-# CSRF settings
-CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:8080",
-    "http://localhost:5174",
-]
-CSRF_COOKIE_SECURE = False  # Set to True in production
-CSRF_COOKIE_HTTPONLY = False
-CSRF_COOKIE_SAMESITE = 'Lax'
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    # 'django.middleware.csrf.CsrfViewMiddleware',  # Uncomment this line
+    'django.middleware.csrf.CsrfViewMiddleware',  # Uncomment this line
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -202,23 +193,7 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Add REST Framework settings
-REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': [],
-    'DEFAULT_PERMISSION_CLASSES': [],
-    'UNAUTHENTICATED_USER': None,
-}
 
-# Update CORS settings
-CORS_ALLOW_ALL_ORIGINS = True
-CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_METHODS = [
-    'DELETE',
-    'GET',
-    'OPTIONS',
-    'PATCH',
-    'POST',
-    'PUT',
-]
 
 
 
