@@ -1,3 +1,4 @@
+
 from mongoengine import Document, StringField, EmailField, BooleanField, DateTimeField, FileField, ReferenceField, ListField, DictField, IntField, FloatField
 from werkzeug.security import generate_password_hash, check_password_hash
 import phonenumbers
@@ -104,39 +105,32 @@ class SavedQuiz(Document):
         'indexes': ['user', 'saved_at']
     }
 
+class Subscription(Document):
+    user = ReferenceField('User', required=True)
+    plan_name = StringField(required=True)
+    credits = IntField(default=0)
+    start_date = DateTimeField(default=datetime.utcnow)
+    end_date = DateTimeField(required=True)
+    is_active = BooleanField(default=True)
+
+    meta = {
+        'collection': 'subscriptions',
+        'indexes': ['user', 'end_date']
+    }
+
 class Payment(Document):
     user = ReferenceField('User', required=True)
     amount = FloatField(required=True)
     transaction_id = StringField(required=True, unique=True)
     payment_date = DateTimeField(default=datetime.utcnow)
-    attempts_purchased = IntField(required=True, default=1)
-    attempts_remaining = IntField(required=True)
-    payment_method = StringField(default='phonepe')
-    phonepe_transaction_id = StringField(unique=True, sparse=True)
-    phonepe_payment_url = StringField()
-    payment_response = DictField()
-    status = StringField(required=True, choices=['pending', 'success', 'failed'])
+    subscription = ReferenceField('Subscription')
+    status = StringField(required=True)
     invoice_url = StringField()
 
     meta = {
         'collection': 'payments',
-        'indexes': [
-            'user',
-            'payment_date',
-            'transaction_id',
-            'phonepe_transaction_id'
-        ]
+        'indexes': ['user', 'payment_date', 'transaction_id']
     }
-
-    def calculate_amount(self):
-        return self.attempts_purchased * 50.0  # ₹50 per attempt
-
-    def save(self, *args, **kwargs):
-        if not self.amount:
-            self.amount = self.calculate_amount()
-        if self.attempts_remaining is None:
-            self.attempts_remaining = self.attempts_purchased
-        super(Payment, self).save(*args, **kwargs)
 
 class Feedback(Document):
     user = ReferenceField('User', required=True)
@@ -205,7 +199,7 @@ class QuizAttempt(Document):
         better_scores = QuizAttempt.objects(score__gt=self.score).count()
         total_users = QuizAttempt.objects().distinct('user').count()
         self.rank = better_scores + 1
-        self.percentile = ((total_users - self.rank + 1) / total_users * 100) if total_users > 0 else 0
+        self.percentile = ((total_users - self.rank) / total_users * 100) if total_users > 0 else 0
 
     def save(self, *args, **kwargs):
         self.calculate_stats()

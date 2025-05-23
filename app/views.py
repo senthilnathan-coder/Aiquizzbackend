@@ -502,6 +502,7 @@ class SignupView(APIView):
                 return Response({
                     'message': 'User registered successfully',
                     'user': {
+                        '_id': str(user.id),  # Include this line
                         'full_name': user.full_name,
                         'email': user.email,
                         'phone_number': user.phone_number,
@@ -540,6 +541,7 @@ class SigninView(APIView):
             return Response({
                 'message': 'Login successful',
                 'user': {
+                    '_id': str(user.id),  # Include this line
                     'full_name': user.full_name,
                     'email': user.email,
                     'phone_number': user.phone_number,
