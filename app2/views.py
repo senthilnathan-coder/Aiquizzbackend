@@ -8,8 +8,19 @@ from app.models import *
 from app2.models import *
 from mongoengine import DoesNotExist,ValidationError
 
+from functools import wraps
 
-
+def admin_required(func):
+    @wraps(func)
+    def wrapper(self, request, pk=None, *args, **kwargs):
+        try:
+            admin = Admin.objects.get(id=pk)
+            request.admin = admin
+            return func(self, request, pk, *args, **kwargs)
+        except Admin.DoesNotExist:
+            return Response({'error': 'Unauthorized admin or invalid admin ID'},
+                            status=status.HTTP_401_UNAUTHORIZED)
+    return wrapper
 
 class AdminsignupView(APIView):
     def post(self,request):
@@ -44,7 +55,7 @@ class AdminsignupView(APIView):
             return Response({'error':str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class AdminsignView(APIView):
+class AdminsigninView(APIView):
     def post(self,request):
         try:
             data=request.data
@@ -72,7 +83,8 @@ class AdminsignView(APIView):
 
 
 class UserManagementView(APIView):
-    def get(self, request):
+    @admin_required
+    def get(self, request,pk):
         try:
             users = User.objects().all()
             user_list = [{
@@ -90,8 +102,8 @@ class UserManagementView(APIView):
         except Exception as e:
             return Response({'error': str(e)}, 
                           status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    def post(self, request):
+    @admin_required
+    def post(self, request,pk):
         try:
             data = request.data
             user = User(
@@ -113,8 +125,8 @@ class UserManagementView(APIView):
         except Exception as e:
             return Response({'error': str(e)}, 
                           status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    def put(self, request, pk):
+    @admin_required
+    def put(self, request,):
         try:
             user = User.objects(id=pk).first()
             if not user:
@@ -145,7 +157,7 @@ class UserManagementView(APIView):
         except Exception as e:
             return Response({'error': str(e)}, 
                           status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+    @admin_required
     def delete(self, request, pk):
         try:
             user = User.objects(id=pk).first()
@@ -161,7 +173,8 @@ class UserManagementView(APIView):
                           status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class FeedbackManagementView(APIView):
-    def get(self, request):
+    @admin_required
+    def get(self, request,pk):
         try:
             feedbacks = Feedback.objects().all()
             feedback_list = [{
@@ -185,7 +198,8 @@ class FeedbackManagementView(APIView):
                           status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class PerformanceAnalyticsView(APIView):
-    def get(self, request):
+    @admin_required
+    def get(self, request,pk):
         try:
             # Get all quiz attempts
             quiz_attempts = QuizAttempt.objects().all()

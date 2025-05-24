@@ -70,86 +70,86 @@ class User(Document):
         if not self.full_name or len(self.full_name.strip()) < 2:
             raise ValueError("Full name must be at least 2 characters long")
 
-class UserStreak(Document):
-    user = ReferenceField('User', required=True)
-    current_streak = IntField(default=0)
-    longest_streak = IntField(default=0)
-    last_quiz_date = DateTimeField()
-    streak_history = ListField(DictField())
+# class UserStreak(Document):
+#     user = ReferenceField('User', required=True)
+#     current_streak = IntField(default=0)
+#     longest_streak = IntField(default=0)
+#     last_quiz_date = DateTimeField()
+#     streak_history = ListField(DictField())
 
-    meta = {
-        'collection': 'user_streaks',
-        'indexes': ['user', 'current_streak']
-    }
+#     meta = {
+#         'collection': 'user_streaks',
+#         'indexes': ['user', 'current_streak']
+#     }
 
-class UserPoints(Document):
-    user = ReferenceField('User', required=True)
-    total_points = IntField(default=0)
-    level = IntField(default=1)
-    points_history = ListField(DictField())
+# class UserPoints(Document):
+#     user = ReferenceField('User', required=True)
+#     total_points = IntField(default=0)
+#     level = IntField(default=1)
+#     points_history = ListField(DictField())
 
-    meta = {
-        'collection': 'user_points',
-        'indexes': ['user', 'total_points']
-    }
+#     meta = {
+#         'collection': 'user_points',
+#         'indexes': ['user', 'total_points']
+#     }
 
-class SavedQuiz(Document):
-    user = ReferenceField('User', required=True)
-    quiz_attempt = ReferenceField('QuizAttempt')
-    notes = StringField()
-    saved_at = DateTimeField(default=datetime.utcnow)
+# class SavedQuiz(Document):
+#     user = ReferenceField('User', required=True)
+#     quiz_attempt = ReferenceField('QuizAttempt')
+#     notes = StringField()
+#     saved_at = DateTimeField(default=datetime.utcnow)
 
-    meta = {
-        'collection': 'saved_quizzes',
-        'indexes': ['user', 'saved_at']
-    }
+#     meta = {
+#         'collection': 'saved_quizzes',
+#         'indexes': ['user', 'saved_at']
+#     }
 
-class Payment(Document):
-    user = ReferenceField('User', required=True)
-    amount = FloatField(required=True)
-    transaction_id = StringField(required=True, unique=True)
-    payment_date = DateTimeField(default=datetime.utcnow)
-    attempts_purchased = IntField(required=True, default=1)
-    attempts_remaining = IntField(required=True)
-    payment_method = StringField(default='phonepe')
-    phonepe_transaction_id = StringField(unique=True, sparse=True)
-    phonepe_payment_url = StringField()
-    payment_response = DictField()
-    status = StringField(required=True, choices=['pending', 'success', 'failed'])
-    invoice_url = StringField()
+# class Payment(Document):
+#     user = ReferenceField('User', required=True)
+#     amount = FloatField(required=True)
+#     transaction_id = StringField(required=True, unique=True)
+#     payment_date = DateTimeField(default=datetime.utcnow)
+#     attempts_purchased = IntField(required=True, default=1)
+#     attempts_remaining = IntField(required=True)
+#     payment_method = StringField(default='phonepe')
+#     phonepe_transaction_id = StringField(unique=True, sparse=True)
+#     phonepe_payment_url = StringField()
+#     payment_response = DictField()
+#     status = StringField(required=True, choices=['pending', 'success', 'failed'])
+#     invoice_url = StringField()
 
-    meta = {
-        'collection': 'payments',
-        'indexes': [
-            'user',
-            'payment_date',
-            'transaction_id',
-            'phonepe_transaction_id'
-        ]
-    }
+#     meta = {
+#         'collection': 'payments',
+#         'indexes': [
+#             'user',
+#             'payment_date',
+#             'transaction_id',
+#             'phonepe_transaction_id'
+#         ]
+#     }
 
-    def calculate_amount(self):
-        return self.attempts_purchased * 50.0  # ₹50 per attempt
+#     def calculate_amount(self):
+#         return self.attempts_purchased * 50.0  # ₹50 per attempt
 
-    def save(self, *args, **kwargs):
-        if not self.amount:
-            self.amount = self.calculate_amount()
-        if self.attempts_remaining is None:
-            self.attempts_remaining = self.attempts_purchased
-        super(Payment, self).save(*args, **kwargs)
+#     def save(self, *args, **kwargs):
+#         if not self.amount:
+#             self.amount = self.calculate_amount()
+#         if self.attempts_remaining is None:
+#             self.attempts_remaining = self.attempts_purchased
+#         super(Payment, self).save(*args, **kwargs)
 
-class Feedback(Document):
-    user = ReferenceField('User', required=True)
-    type = StringField(required=True)  # 'feedback' or 'issue'
-    title = StringField(required=True)
-    description = StringField(required=True)
-    status = StringField(default='pending')
-    created_at = DateTimeField(default=datetime.utcnow)
+# class Feedback(Document):
+#     user = ReferenceField('User', required=True)
+#     type = StringField(required=True)  # 'feedback' or 'issue'
+#     title = StringField(required=True)
+#     description = StringField(required=True)
+#     status = StringField(default='pending')
+#     created_at = DateTimeField(default=datetime.utcnow)
 
-    meta = {
-        'collection': 'feedback',
-        'indexes': ['user', 'type', 'status']
-    }
+#     meta = {
+#         'collection': 'feedback',
+#         'indexes': ['user', 'type', 'status']
+#     }
 
 class QuizAttempt(Document):
     user = ReferenceField('User', required=True)
@@ -210,3 +210,17 @@ class QuizAttempt(Document):
     def save(self, *args, **kwargs):
         self.calculate_stats()
         super(QuizAttempt, self).save(*args, **kwargs)
+
+class Quiz(Document):
+    user= ReferenceField('User',required=True)
+    title = StringField(required=True)
+    questions = ListField(DictField(), required=True)
+    difficulty = StringField(required=True, choices=['easy', 'medium', 'hard'])
+    question_type = StringField(required=True, choices=['mcq', 'true_false'])
+    created_at = DateTimeField(default=datetime.utcnow)
+    content_type = StringField()  # 'text', 'image', 'audio', etc.
+    
+    meta = {
+        'collection': 'quizzes',
+        'indexes': ['created_at', 'difficulty', 'question_type']
+    }

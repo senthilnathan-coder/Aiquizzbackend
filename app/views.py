@@ -1,4 +1,3 @@
-
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -26,6 +25,8 @@ from PyPDF2 import PdfReader
 from docx import Document
 from pptx import Presentation
 from openpyxl import load_workbook
+from app.serializers import *
+# from rest_framework.permissions import IsAuthenticated
 
 genai.configure(api_key=settings.GEMINI_API_KEY)
 whisper_model = WhisperModel("tiny", compute_type="float32",device="cpu")
@@ -263,149 +264,29 @@ def parse_questions(response_text, question_type='mcq'):
     
     return questions
 
-class PaymentView(APIView):
-    def get(self, request):
-        try:
-            user = request.user
-            payments = Payment.objects.filter(user=user).order_by('-payment_date')
-            
-            payment_data = [{
-                'transaction_id': payment.transaction_id,
-                'amount': payment.amount,
-                'status': payment.status,
-                'payment_date': payment.payment_date,
-                'attempts_remaining': payment.attempts_remaining
-            } for payment in payments]
-            
-            return Response({
-                'payments': payment_data
-            })
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    def post(self, request):
-        try:
-            user = request.user
-            num_attempts = int(request.data.get('num_attempts', 1))
-            
-            if num_attempts < 1:
-                return Response({
-                    'error': 'Number of attempts must be at least 1'
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
-            # Calculate amount (₹50 per attempt)
-            amount = num_attempts * 50
-            
-            # Generate unique transaction ID
-            transaction_id = f"QUIZ_{int(time.time())}_{user.id}"
-            
-            # Create payment record
-            payment = Payment(
-                user=user,
-                transaction_id=transaction_id,
-                amount=amount,
-                attempts_purchased=num_attempts,
-                attempts_remaining=num_attempts,
-                status='pending'
-            )
-            payment.save()
-            
-            # Generate PhonePe payload
-            payload = {
-                "merchantId": settings.PHONEPE_MERCHANT_ID,
-                "merchantTransactionId": transaction_id,
-                "amount": amount * 100,  # Amount in paise
-                "redirectUrl": f"{settings.SITE_URL}/payment/callback/",
-                "redirectMode": "POST",
-                "callbackUrl": f"{settings.SITE_URL}/payment/callback/",
-                "mobileNumber": user.phone_number,
-                "paymentInstrument": {
-                    "type": "PAY_PAGE"
-                }
-            }
-            
-            # Generate checksum
-            payload_str = json.dumps(payload)
-            encoded_payload = base64.b64encode(payload_str.encode()).decode()
-            salt_key = settings.PHONEPE_SALT
-            salt_index = 1
-            
-            string_to_hash = encoded_payload + "/pg/v1/pay" + salt_key
-            sha256_hash = hashlib.sha256(string_to_hash.encode()).hexdigest()
-            checksum = sha256_hash + "###" + str(salt_index)
-            
-            # Make request to PhonePe
-            headers = {
-                "Content-Type": "application/json",
-                "X-VERIFY": checksum
-            }
-            
-            phonepe_response = requests.post(
-                f"{settings.PHONEPE_API_URL}/pg/v1/pay",
-                json={
-                    "request": encoded_payload
-                },
-                headers=headers
-            )
-            
-            if phonepe_response.status_code == 200:
-                response_data = phonepe_response.json()
-                if response_data.get('success'):
-                    return Response({
-                        'payment_url': response_data['data']['instrumentResponse']['redirectInfo']['url'],
-                        'transaction_id': transaction_id
-                    })
-            
-            return Response({
-                'error': 'Payment initiation failed'
-            }, status=status.HTTP_400_BAD_REQUEST)
-            
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-class PaymentCallbackView(APIView):
-    def post(self, request):
-        try:
-            # Verify callback signature
-            callback_data = request.data
-            signature = request.headers.get('X-VERIFY')
-            
-            if not signature:
-                return Response({'error': 'Invalid callback'}, status=status.HTTP_400_BAD_REQUEST)
-            
-            # Verify signature
-            salt_key = settings.PHONEPE_SALT
-            string_to_hash = callback_data['response'] + salt_key
-            computed_hash = hashlib.sha256(string_to_hash.encode()).hexdigest()
-            
-            if computed_hash != signature.split('###')[0]:
-                return Response({'error': 'Invalid signature'}, status=status.HTTP_400_BAD_REQUEST)
-            
-            # Process payment response
-            response_data = json.loads(base64.b64decode(callback_data['response']))
-            transaction_id = response_data['merchantTransactionId']
-            
-            payment = Payment.objects.get(transaction_id=transaction_id)
-            payment.status = 'success' if response_data['code'] == 'PAYMENT_SUCCESS' else 'failed'
-            payment.payment_date = datetime.now()
-            payment.save()
-            
-            return Response({'status': 'success'})
-            
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class MultimodalQuizView(APIView):
-    def get(self, request):
-        return Response({
-            'message': 'Please send a POST request with content to generate quiz',
-            'supported_content_types': ['text', 'image', 'audio', 'video', 'pdf', 'word', 'ppt', 'excel', 'url'],
-            'difficulty_levels': ['easy', 'medium', 'hard'],
-            'question_types': ['mcq', 'true_false']
-        })
-
-    def post(self, request):
+    def get(self, request, pk):
         try:
+            # Get user by pk
+            user = User.objects.get(id=pk)
+            return Response({
+                'message': 'Please send a POST request with content to generate quiz',
+                'supported_content_types': ['text', 'image', 'audio', 'video', 'pdf', 'word', 'ppt', 'excel', 'url'],
+                'difficulty_levels': ['easy', 'medium', 'hard'],
+                'question_types': ['mcq', 'true_false']
+            })
+        except User.DoesNotExist:
+            return Response({
+                'error': 'User not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+    def post(self, request, pk):
+        try:
+            # Get user by pk
+            user = User.objects.get(id=pk)
+            
             # Check for valid payment first
             # user = request.user
             # valid_payment = Payment.objects.filter(
@@ -420,6 +301,7 @@ class MultimodalQuizView(APIView):
             #     }, status=status.HTTP_402_PAYMENT_REQUIRED)
 
             # # Handle multipart form data or JSON
+            
             content_type = request.headers.get('Content-Type', '')
             is_multipart = 'multipart/form-data' in content_type.lower()
 
@@ -614,7 +496,7 @@ class MultimodalQuizView(APIView):
                     'error': 'Failed to generate questions'
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            # For answer submission and database storage
+            # Only save if answers are submitted
             if request.data.get('submitted') or (is_multipart and request.POST.get('submitted')):
                 user_answers = []
                 if is_multipart:
@@ -624,130 +506,115 @@ class MultimodalQuizView(APIView):
                 
                 score = sum(1 for i, q in enumerate(questions) if user_answers[i] == q['answer'])
                 
-                # Create and save quiz attempt
-                quiz_attempt = QuizAttempt(
-                    user=request.user,
-                    questions=questions,
-                    user_answers=user_answers,
-                    score=score,
-                    total=len(questions),
-                    difficulty=difficulty,
-                    question_type=question_type
-                )
-                quiz_attempt.save()
-                
-                # Decrement attempts_remaining
-                # valid_payment.attempts_remaining -= 1
-                # valid_payment.save()
-                
-                return Response({
+                # Create quiz data and validate with serializer
+                quiz_data = {
+                    'user': user,
+                    'title': f"{difficulty.capitalize()} {question_type.upper()} Quiz",
+                    'questions': questions,
+                    'difficulty': difficulty,
+                    'question_type': question_type,
+                    'content_type': 'text'
+                }
+                quiz_serializer = QuizSerializer(data=quiz_data)
+                if not quiz_serializer.is_valid():
+                    return Response(quiz_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                quiz = quiz_serializer.save()
+
+                # Create quiz attempt data and validate with serializer
+                quiz_attempt_data = {
+                    'user': user,
                     'questions': questions,
                     'user_answers': user_answers,
                     'score': score,
                     'total': len(questions),
                     'difficulty': difficulty,
-                    'question_type': question_type,
-                    # 'attempts_remaining': valid_payment.attempts_remaining
+                    'question_type': question_type
+                }
+                quiz_attempt_serializer = QuizAttemptSerializer(data=quiz_attempt_data)
+                if not quiz_attempt_serializer.is_valid():
+                    return Response(quiz_attempt_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                quiz_attempt = quiz_attempt_serializer.save()
+
+                return Response({
+                    'quiz_id': str(quiz.id),
+                    'attempt_id': str(quiz_attempt.id),
+                    'score': score,
+                    'total': len(questions),
+                    'accuracy': (score / len(questions)) * 100 if len(questions) > 0 else 0
+                })
+            else:
+                # If not submitted, just return the questions
+                return Response({
+                    'questions': [{
+                        'question': q['question'],
+                        'options': q['options'],
+                        'answer':q['answer']
+                    } for q in questions]
                 })
 
+        except User.DoesNotExist:
             return Response({
-                'success': True,
-                'questions': questions,
-                'difficulty': difficulty,
-                'question_type': question_type,
-                # 'attempts_remaining': valid_payment.attempts_remaining
-            })
-
+                'error': 'User not found'
+            }, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-class SignupView(APIView):
+class UserSignupView(APIView):
     def post(self, request):
         try:
-            # Extract user data
             data = request.data
-            full_name = data.get('full_name')
-            phone_number = data.get('phone_number')
-            country_code = data.get('country_code')
-            email = data.get('email')
-            password = data.get('password')
-            confirm_password = data.get('confirm_password')
-            profile_image = request.FILES.get('profile')
-
-            # Check if required fields are present
-            if not all([full_name, phone_number, country_code, email, password, confirm_password, profile_image]):
-                return Response({'error': 'All fields including profile image are required'}, status=status.HTTP_400_BAD_REQUEST)
-
-            # Check if user already exists
-            if User.objects(email=email).first():
-                return Response({'error': 'useremail already registered'}, status=status.HTTP_400_BAD_REQUEST)
+            serializer = UserSerializer(data=data)
             
-            if User.objects(phone_number=phone_number).first():
-                return Response({'error': 'Phone number already registered'}, status=status.HTTP_400_BAD_REQUEST)
-
-            # Create new user
-            user = User(
-                full_name=full_name,
-                phone_number=phone_number,
-                country_code=country_code,
-                email=email,
-                profile=profile_image
-            )
-
-            try:
-                user.set_password(password, confirm_password)
-                user.clean()
+            if serializer.is_valid():
+                # Create user instance but don't save yet
+                user = User(
+                    profile=data['profile'],
+                    full_name=data['full_name'],
+                    phone_number=data['phone_number'],
+                    country_code=data['country_code'],
+                    email=data['email']
+                )
+                
+                # Set password
+                user.set_password(data['password'], data['confirm_password'])
                 user.save()
                 
                 return Response({
-                    'message': 'User registered successfully',
-                    'user': {
-                        'full_name': user.full_name,
-                        'email': user.email,
-                        'phone_number': user.phone_number,
-                        'country_code': user.country_code,
-                        'profile': True
-                    }
+                    'message': 'User created successfully',
+                    'user_id': str(user.id)
                 }, status=status.HTTP_201_CREATED)
-
-            except ValueError as e:
-                return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
+            
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+        except ValidationError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-class SigninView(APIView):
+class UserLoginView(APIView):
     def post(self, request):
         try:
-            data = request.data
-            email = data.get('email')
-            password = data.get('password')
-
-            if not all([email, password]):
-                return Response({'error': 'Email and password are required'}, status=status.HTTP_400_BAD_REQUEST)
-
-            user = User.objects(email=email).first()
-            if not user or not user.check_password(password):
-                return Response({'error': 'Invalid email or password'}, status=status.HTTP_401_UNAUTHORIZED)
-
-            if not user.is_active:
-                return Response({'error': 'Account is disabled'}, status=status.HTTP_403_FORBIDDEN)
-
-            # Update last login
-            user.last_login = datetime.utcnow()
-            user.save()
-
-            return Response({
-                'message': 'Login successful',
-                'user': {
-                    'full_name': user.full_name,
-                    'email': user.email,
-                    'phone_number': user.phone_number,
-                    'country_code': user.country_code,
-                    'profile': True
-                }
-            })
-
+            email = request.data.get('email')
+            password = request.data.get('password')
+            
+            try:
+                user = User.objects.get(email=email)
+            except DoesNotExist:
+                return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+            
+            if user.check_password(password):
+                user.last_login = datetime.utcnow()
+                user.save()
+                
+                return Response({
+                    'message': 'Login successful',
+                    'user_id': str(user.id)
+                })
+            
+            return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+            
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -767,99 +634,6 @@ class UserDetailView(APIView):
         except (DoesNotExist, ValidationError):
             return Response({"error": "User not found or invalid ID"}, status=status.HTTP_404_NOT_FOUND)
     
-class UserDashboardView(APIView):
-    def get(self, request, pk):
-        try:
-            # Get user by pk
-            user = User.objects.get(pk=pk)
-            
-            # Get or create user stats
-            try:
-                streak = UserStreak.objects.get(user=user)
-            except UserStreak.DoesNotExist:
-                streak = UserStreak(user=user).save()
-                
-            try:
-                points = UserPoints.objects.get(user=user)
-            except UserPoints.DoesNotExist:
-                points = UserPoints(user=user).save()
-            
-            # Get recent quiz attempts
-            recent_attempts = QuizAttempt.objects.filter(user=user).order_by('-created_at')[:5]
-            
-            # Get active payments
-            # active_payments = Payment.objects.filter(
-            #     user=user,
-            #     status='success'
-            # ).order_by('-payment_date')
-            
-            # Calculate quiz statistics
-            total_attempts = QuizAttempt.objects.filter(user=user).count()
-            avg_accuracy = QuizAttempt.objects.filter(user=user).average('accuracy')
-            
-            # Get weak topics
-            weak_topics = set()
-            for attempt in recent_attempts:
-                weak_topics.update(attempt.weak_topics)
-            
-            # Get saved quizzes
-            saved_quizzes = SavedQuiz.objects.filter(user=user).order_by('-saved_at')[:5]
-            
-            # Get recent feedback
-            recent_feedback = Feedback.objects.filter(user=user).order_by('-created_at')[:3]
-            
-            dashboard_data = {
-                'user_info': {
-                    'id': str(user.pk),
-                    'full_name': user.full_name,
-                    'email': user.email,
-                    'joined_date': user.created_at
-                },
-                'streak_info': {
-                    'current_streak': streak.current_streak,
-                    'longest_streak': streak.longest_streak,
-                    'last_quiz_date': streak.last_quiz_date
-                },
-                'points_info': {
-                    'total_points': points.total_points,
-                    'level': points.level,
-                    'points_history': points.points_history[-5:]
-                },
-                'quiz_stats': {
-                    'total_attempts': total_attempts,
-                    'average_accuracy': round(avg_accuracy, 2) if avg_accuracy else 0,
-                    'recent_attempts': [{
-                        'date': attempt.created_at,
-                        'score': attempt.score,
-                        'accuracy': attempt.accuracy,
-                        'difficulty': attempt.difficulty
-                    } for attempt in recent_attempts],
-                    'weak_topics': list(weak_topics)
-                },
-                # 'payment_info': [{
-                #     'transaction_id': payment.transaction_id,
-                #     'amount': payment.amount,
-                #     'status': payment.status,
-                #     'payment_date': payment.payment_date
-                # } for payment in active_payments],
-                'saved_quizzes': [{
-                    'quiz_id': str(saved.quiz_attempt.id),
-                    'saved_at': saved.saved_at,
-                    'notes': saved.notes
-                } for saved in saved_quizzes],
-                'recent_feedback': [{
-                    'title': feedback.title,
-                    'type': feedback.type,
-                    'status': feedback.status,
-                    'created_at': feedback.created_at
-                } for feedback in recent_feedback]
-            }
-            
-            return Response(dashboard_data)
-            
-        except User.DoesNotExist:
-            return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
         
     
