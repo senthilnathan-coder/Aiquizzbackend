@@ -189,9 +189,18 @@ def extract_excel_text(excel_file):
 
 def parse_questions(response_text, question_type='mcq'):
     questions = []
-    blocks = response_text.strip().split("Q")[1:]
+    topic = 'general'  # Default topic
     
     try:
+        # Extract topic first
+        lines = response_text.strip().splitlines()
+        for line in lines:
+            if line.strip().lower().startswith('topic:'):
+                topic = line.split(':', 1)[1].strip()
+                break
+        
+        blocks = response_text.strip().split("Q")[1:]
+        
         for block in blocks:
             try:
                 lines = [line.strip() for line in block.strip().splitlines() if line.strip()]
@@ -209,7 +218,6 @@ def parse_questions(response_text, question_type='mcq'):
                     options = []
                     answer_line = None
                     
-                    # Extract options and answer more flexibly
                     for line in lines[1:]:
                         line = line.strip()
                         if line.lower().startswith(('a.', 'b.', 'c.', 'd.')):
@@ -225,7 +233,8 @@ def parse_questions(response_text, question_type='mcq'):
                             questions.append({
                                 'question': question_text,
                                 'options': options,
-                                'answer': options[correct_index]
+                                'answer': options[correct_index],
+                                'topic': topic
                             })
                 
                 # Handle True/False format
@@ -233,7 +242,6 @@ def parse_questions(response_text, question_type='mcq'):
                     options = ['True', 'False']
                     answer_line = None
                     
-                    # Find answer line with flexible matching
                     for line in lines:
                         if any(line.lower().startswith(prefix) for prefix in ['answer:', 'ans:', 'a:']):
                             answer_line = line
@@ -242,7 +250,6 @@ def parse_questions(response_text, question_type='mcq'):
                     if answer_line:
                         answer_text = answer_line.split(':')[1].strip().lower()
                         
-                        # Simplified answer matching for true/false
                         if answer_text in ['true', 't', 'a']:
                             correct_index = 0
                         elif answer_text in ['false', 'f', 'b']:
@@ -253,7 +260,8 @@ def parse_questions(response_text, question_type='mcq'):
                         questions.append({
                             'question': question_text,
                             'options': options,
-                            'answer': options[correct_index]
+                            'answer': options[correct_index],
+                            'topic': topic
                         })
             except Exception as block_error:
                 print(f"Error parsing block: {str(block_error)}")
@@ -356,8 +364,11 @@ class MultimodalQuizView(APIView):
                 prompt = f"""
                 You're an AI quiz generator.
                 {difficulty_instructions[difficulty]}
-                Based on the following content, generate 10 multiple choice questions with 4 options.
+                Based on the following content, first identify the main topic of the content.
+                Then generate 10 multiple choice questions with 4 options related to that topic.
                 Format strictly like:
+                Topic: <main_topic>
+                
                 Q: <question>
                 A. <option>
                 B. <option>
@@ -371,8 +382,11 @@ class MultimodalQuizView(APIView):
                 prompt = f"""
                 You're an AI quiz generator.
                 {difficulty_instructions[difficulty]}
-                Based on the following content, generate 10 true/false questions.
+                Based on the following content, first identify the main topic of the content.
+                Then generate 10 true/false questions related to that topic.
                 Format strictly like:
+                Topic: <main_topic>
+                
                 Q: <question>
                 A. True
                 B. False
@@ -490,76 +504,113 @@ class MultimodalQuizView(APIView):
             response = model.generate_content(parts)
             output = response.text
             questions = parse_questions(output, question_type)
-
+            
+            # Generate questions using Gemini and process them...
             if not questions:
                 return Response({
                     'error': 'Failed to generate questions'
                 }, status=status.HTTP_400_BAD_REQUEST)
-
-            # Only save if answers are submitted
+            
+            # Get the main topic (using the first question's topic)
+            main_topic = questions[0].get('topic', 'general')
+            
+            # Prepare quiz data
+            quiz_data = {
+                'user': str(user.id),
+                'title': f"{difficulty.capitalize()} {question_type.upper()} Quiz",
+                'questions': questions,
+                'difficulty': difficulty,
+                'question_type': question_type,
+                'content_type': content_type,
+                'topics': [main_topic]  # Use a single topic instead of collecting from all questions
+            }
+            
+            # Initialize user data if not exists
+            user_streak = UserStreak.objects(user=user).first()
+            if not user_streak:
+                user_streak = UserStreak(user=user)
+                user_streak.save()
+            
+            user_points = UserPoints.objects(user=user).first()
+            if not user_points:
+                user_points = UserPoints(user=user)
+                user_points.save()
+            
+            # When quiz is submitted
             if request.data.get('submitted') or (is_multipart and request.POST.get('submitted')):
-                user_answers = []
-                if is_multipart:
-                    user_answers = [request.POST.get(f'question_{i}') for i in range(len(questions))]
-                else:
-                    user_answers = request.data.get('user_answers', [])
-                
-                score = sum(1 for i, q in enumerate(questions) if user_answers[i] == q['answer'])
-                
-                # Create quiz data and validate with serializer
+                # Create quiz
                 quiz_data = {
-                    'user': user,
+                    'user': str(user.id),
                     'title': f"{difficulty.capitalize()} {question_type.upper()} Quiz",
                     'questions': questions,
                     'difficulty': difficulty,
                     'question_type': question_type,
-                    'content_type': 'text'
+                    'content_type': content_type,
+                    'topics': [main_topic]
                 }
+                
                 quiz_serializer = QuizSerializer(data=quiz_data)
                 if not quiz_serializer.is_valid():
                     return Response(quiz_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
                 quiz = quiz_serializer.save()
-
-                # Create quiz attempt data and validate with serializer
+                
+                # Create quiz attempt
+                user_answers = request.data.get('user_answers', []) if not is_multipart else \
+                              [request.POST.get(f'question_{i}') for i in range(len(questions))]
+                
+                score = sum(1 for i, q in enumerate(questions) if user_answers[i] == q['answer'])
+                
                 quiz_attempt_data = {
-                    'user': user,
+                    'user': str(user.id),
+                    'quiz': str(quiz.id),
                     'questions': questions,
                     'user_answers': user_answers,
                     'score': score,
                     'total': len(questions),
                     'difficulty': difficulty,
-                    'question_type': question_type
+                    'question_type': question_type,
+                    'topics': [main_topic],
+                    'content_types': content_type
                 }
+                
                 quiz_attempt_serializer = QuizAttemptSerializer(data=quiz_attempt_data)
                 if not quiz_attempt_serializer.is_valid():
                     return Response(quiz_attempt_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                
                 quiz_attempt = quiz_attempt_serializer.save()
-
+                
+                # The QuizAttempt.save() method will automatically:
+                # 1. Calculate accuracy and points
+                # 2. Update user streak
+                # 3. Update user points
+                # 4. Identify weak topics
+                # 5. Calculate rank and percentile
+                
                 return Response({
                     'quiz_id': str(quiz.id),
                     'attempt_id': str(quiz_attempt.id),
                     'score': score,
                     'total': len(questions),
-                    'accuracy': (score / len(questions)) * 100 if len(questions) > 0 else 0
+                    'accuracy': quiz_attempt.accuracy,
+                    'points_earned': quiz_attempt.points_earned,
+                    'topics': quiz_attempt.topics,
+                    'weak_topics': quiz_attempt.weak_topics
                 })
             else:
-                # If not submitted, just return the questions
+                # Return questions without saving quiz or attempt
                 return Response({
+                    'topics': main_topic,
                     'questions': [{
                         'question': q['question'],
                         'options': q['options'],
-                        'answer':q['answer']
+                        'answer': q['answer']
                     } for q in questions]
                 })
-
+                
         except User.DoesNotExist:
-            return Response({
-                'error': 'User not found'
-            }, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            return Response({
-                'error': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class UserSignupView(APIView):
     def post(self, request):
@@ -633,6 +684,68 @@ class UserDetailView(APIView):
         
         except (DoesNotExist, ValidationError):
             return Response({"error": "User not found or invalid ID"}, status=status.HTTP_404_NOT_FOUND)
+
+class UserDashboardView(APIView):
+    def get(self, request, pk):
+        try:
+            user = User.objects.get(id=pk)
+            
+            # Get quiz attempts
+            attempts = QuizAttempt.objects(user=user).order_by('-created_at')
+            
+            # Get user streak
+            streak = UserStreak.objects(user=user).first()
+            
+            # Get user points
+            points = UserPoints.objects(user=user).first()
+            
+            # Get saved quizzes
+            saved_quizzes = SavedQuiz.objects(user=user).order_by('-saved_at')
+            
+            # Get feedback history
+            feedback_history = Feedback.objects(user=user).order_by('-created_at')
+            
+            # Attach related data to user object
+            user.quiz_attempts = attempts
+            user.streak = streak
+            user.points = points
+            user.saved_quizzes = saved_quizzes
+            user.feedback_history = feedback_history
+            
+            # Serialize user data with all related information
+            user_data = UserDashboardSerializer(user).data
+            return Response(user_data)
+            
+        except User.DoesNotExist:
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class FeedbackView(APIView):
+    def post(self, request, pk):
+        try:
+            user = User.objects.get(id=pk)
+            
+            feedback_data = {
+                'user': user.full_name,
+                'type': request.data.get('type'),
+                'title': request.data.get('title'),
+                'description': request.data.get('description'),
+                'status':request.data.get('status')
+                
+            }
+            
+            feedback = Feedback(**feedback_data)
+            feedback.save()
+            
+            return Response({
+                'message': 'Feedback submitted successfully',
+                'feedback_id': str(feedback.id)
+            }, status=status.HTTP_201_CREATED)
+        except User.DoesNotExist:
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
 
         
