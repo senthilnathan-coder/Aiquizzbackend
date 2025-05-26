@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'app',
     'app2',
     'rest_framework',
+    
 ]
 
 # CORS settings
