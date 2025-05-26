@@ -627,14 +627,20 @@ class UserSignupView(APIView):
                     country_code=data['country_code'],
                     email=data['email']
                 )
-                
+                if not all(['profile','full_name','email','phone_number','password','confirm_password','country_code',]):
+                    return Response({'error':'All fields are required'})
                 # Set password
                 user.set_password(data['password'], data['confirm_password'])
                 user.save()
                 
+         
                 return Response({
                     'message': 'User created successfully',
-                    'user_id': str(user.id)
+                    'user_id': str(user.id),
+                    'full_name':user.full_name,
+                    'phone_number':user.phone_number,
+                    'email':user.email
+                    
                 }, status=status.HTTP_201_CREATED)
             
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -725,6 +731,19 @@ class FeedbackView(APIView):
     def post(self, request, pk):
         try:
             user = User.objects.get(id=pk)
+            # data=request.data
+            # serializer=FeedbackSerializer(data=data)
+            
+            # if serializer.is_valid():
+            #     feedback_data=Feedback(
+            #         user=data['user'],
+            #         type=data['type'],
+            #         title=data['title'],
+            #         describtion=data['describtion'],
+            #         status=data['status']
+                    
+            #     )
+            #     feedback_data.save()
             
             feedback_data = {
                 'user': user.full_name,
@@ -740,7 +759,11 @@ class FeedbackView(APIView):
             
             return Response({
                 'message': 'Feedback submitted successfully',
-                'feedback_id': str(feedback.id)
+                'feedback_id': str(feedback_data
+                                   
+                                   
+                                   
+                                   .id)
             }, status=status.HTTP_201_CREATED)
         except User.DoesNotExist:
             return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
