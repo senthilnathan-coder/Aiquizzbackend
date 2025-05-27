@@ -93,50 +93,72 @@ from mongoengine import connect
 from pymongo.errors import ServerSelectionTimeoutError
 import pymongo
 
+MONGODB_URI = "mongodb+srv://admin:Pass123@cluster0.2fnzdxx.mongodb.net/DIGAIQUEST?retryWrites=true&w=majority&appName=Cluster0"
+
+# MONGODB_SETTINGS = {
+#     'db': 'demo',
+#     'host': 'localhost',
+#     'port': 27017,
+#     # 'username': 'your_user',
+#     # 'password': 'your_password',
+#     # 'authentication_source': 'admin',
+# }
+
 MONGODB_SETTINGS = {
-    'db': 'demo',
-    'host': 'localhost',
-    'port': 27017,
-    # 'username': 'your_user',
-    # 'password': 'your_password',
-    # 'authentication_source': 'admin',
+    'db': 'DIGAIQUEST',
+    'host': MONGODB_URI,
 }
 
 try:
 
+    # connect(
+    #     db=MONGODB_SETTINGS['db'],
+    #     host=MONGODB_SETTINGS['host'],
+    #     port=MONGODB_SETTINGS['port'],
+    #     # username=MONGODB_SETTINGS.get('username'),
+    #     # password=MONGODB_SETTINGS.get('password'),
+    #     # authentication_source=MONGODB_SETTINGS.get('authentication_source'),
+    #     serverSelectionTimeoutMS=3000  # Timeout in milliseconds
+    # )
+
     connect(
         db=MONGODB_SETTINGS['db'],
         host=MONGODB_SETTINGS['host'],
-        port=MONGODB_SETTINGS['port'],
-        # username=MONGODB_SETTINGS.get('username'),
-        # password=MONGODB_SETTINGS.get('password'),
-        # authentication_source=MONGODB_SETTINGS.get('authentication_source'),
-        serverSelectionTimeoutMS=3000  # Timeout in milliseconds
+        serverSelectionTimeoutMS=5000
     )
     
 
-    client = pymongo.MongoClient(
-        host=MONGODB_SETTINGS['host'],
-        port=MONGODB_SETTINGS['port'],
-        serverSelectionTimeoutMS=3000
-    )
+    # client = pymongo.MongoClient(
+    #     host=MONGODB_SETTINGS['host'],
+    #     port=MONGODB_SETTINGS['port'],
+    #     serverSelectionTimeoutMS=3000
+    # )
+
+    client = pymongo.MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
     client.admin.command('ping')
-    print("✅ MongoDB connected successfully!")
+    print("✅ MongoDB connected successfully!",client.address)
 
 except ServerSelectionTimeoutError:
     print("❌ MongoDB connection failed.")
 
 
 DATABASES = {
+    # 'default': {
+    #     'ENGINE': 'djongo',
+    #     'NAME': MONGODB_SETTINGS['db'],
+    #     'CLIENT': {
+    #         'host': MONGODB_SETTINGS['host'],
+    #         'port': MONGODB_SETTINGS['port'],
+    #         # 'username': MONGODB_SETTINGS.get('username'),
+    #         # 'password': MONGODB_SETTINGS.get('password'),
+    #         # 'authSource': MONGODB_SETTINGS.get('authentication_source'),
+    #     }
+    # }
     'default': {
         'ENGINE': 'djongo',
-        'NAME': MONGODB_SETTINGS['db'],
+        'NAME': 'DIGAIQUEST',
         'CLIENT': {
-            'host': MONGODB_SETTINGS['host'],
-            'port': MONGODB_SETTINGS['port'],
-            # 'username': MONGODB_SETTINGS.get('username'),
-            # 'password': MONGODB_SETTINGS.get('password'),
-            # 'authSource': MONGODB_SETTINGS.get('authentication_source'),
+            'host': MONGODB_URI,
         }
     }
 }
