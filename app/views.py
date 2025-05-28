@@ -586,7 +586,9 @@ class MultimodalQuizView(APIView):
                 # 4. Identify weak topics
                 # 5. Calculate rank and percentile
                 
+                # Inside MultimodalQuizView.post method, replace the final return Response with:
                 return Response({
+                    'message': 'Quiz submitted successfully',
                     'quiz_id': str(quiz.id),
                     'attempt_id': str(quiz_attempt.id),
                     'score': score,
@@ -594,8 +596,10 @@ class MultimodalQuizView(APIView):
                     'accuracy': quiz_attempt.accuracy,
                     'points_earned': quiz_attempt.points_earned,
                     'topics': quiz_attempt.topics,
-                    'weak_topics': quiz_attempt.weak_topics
+                    'weak_topics': quiz_attempt.weak_topics,
+                    'status': 'success'
                 })
+                   
             else:
                 # Return questions without saving quiz or attempt
                 return Response({
