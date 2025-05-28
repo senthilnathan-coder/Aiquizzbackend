@@ -35,7 +35,7 @@ class AdminsignupView(APIView):
                     email=data['email'],
                     role=data['role']    
                 )
-                admin.set_password(data['password'],data['password'])
+                admin.set_password(data['password'])
                 admin.save()
                 return Response({
                     'message':'Admin signup succussfully',

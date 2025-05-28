@@ -156,6 +156,7 @@ class QuizAttempt(Document):
     user = ReferenceField('User', required=True)
     quiz = ReferenceField('Quiz', required=True)  # Reference to the original quiz
     questions = ListField(DictField(), required=True)
+    number_questons=IntField(required=True)
     user_answers = ListField(StringField())
     score = IntField(required=True)
     total = IntField(required=True)
@@ -239,6 +240,7 @@ class Quiz(Document):
     user = ReferenceField('User', required=True)
     title = StringField(required=True)
     questions = ListField(DictField(), required=True)
+    number_questions=IntField(required=True)
     difficulty = StringField(required=True, choices=['easy', 'medium', 'hard'])
     question_type = StringField(required=True, choices=['mcq', 'true_false'])
     created_at = DateTimeField(default=datetime.utcnow)

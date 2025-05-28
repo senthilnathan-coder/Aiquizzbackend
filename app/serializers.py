@@ -13,7 +13,7 @@ class QuizSerializer(DocumentSerializer):
     
     class Meta:
         model = Quiz
-        fields = ['id', 'user', 'title', 'questions', 'difficulty', 'question_type', 
+        fields = ['id', 'user', 'title', 'questions', 'number_questions','difficulty', 'question_type', 
                  'created_at', 'content_type', 'topics']
         read_only_fields = ['created_at']
 
@@ -23,7 +23,7 @@ class QuizAttemptSerializer(DocumentSerializer):
     
     class Meta:
         model = QuizAttempt
-        fields = ['id', 'user', 'quiz', 'questions', 'user_answers', 'score', 'total',
+        fields = ['id', 'user', 'quiz', 'questions','number_questions', 'user_answers', 'score', 'total',
                  'difficulty', 'question_type', 'created_at', 'completed_at', 'topics',
                  'accuracy', 'points_earned', 'review_notes', 'weak_topics', 'rank',
                  'percentile', 'time_taken', 'content_types']

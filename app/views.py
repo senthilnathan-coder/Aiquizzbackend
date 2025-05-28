@@ -527,20 +527,19 @@ class MultimodalQuizView(APIView):
                 'topics': [main_topic]  # Use a single topic instead of collecting from all questions
             }
             
-            # Initialize user data if not exists
-            user_streak = UserStreak.objects(user=user).first()
-            if not user_streak:
-                user_streak = UserStreak(user=user)
-                user_streak.save()
-            
-            user_points = UserPoints.objects(user=user).first()
-            if not user_points:
-                user_points = UserPoints(user=user)
-                user_points.save()
-            
             # When quiz is submitted
-            # Inside MultimodalQuizView.post method, in the quiz submission section
             if request.data.get('submitted') or (is_multipart and request.POST.get('submitted')):
+                # Initialize user data if not exists
+                user_streak = UserStreak.objects(user=user).first()
+                if not user_streak:
+                    user_streak = UserStreak(user=user)
+                    user_streak.save()
+                
+                user_points = UserPoints.objects(user=user).first()
+                if not user_points:
+                    user_points = UserPoints(user=user)
+                    user_points.save()
+                
                 # Create quiz
                 quiz_data = {
                     'user': str(user.id),
