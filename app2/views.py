@@ -32,37 +32,39 @@ class AdminsignupView(APIView):
         #     if serializer.is_valid():
         #         admin=Admin(
         #             fullname=data['fullname'],
-        #             email=data['email']
+        #             email=data['email'],
+                    
+                    
         #         )
-        # try:
-        #     data=request.data
+        try:
+            data=request.data
             
-        #     fullname=data.get('fullname')
-        #     email=data.get('email')
-        #     password=data.get('password')
+            fullname=data.get('fullname')
+            email=data.get('email')
+            password=data.get('password')
             
-        #     if not all([fullname,email,password]):
-        #         return Response({'error':'All fields are required'}, status=status.HTTP_400_BAD_REQUEST)
+            if not all([fullname,email,password]):
+                return Response({'error':'All fields are required'}, status=status.HTTP_400_BAD_REQUEST)
 
-        #     if not Admin.validate_email_address(email):
-        #         return Response({'error':'invalid email address'},status=status.HTTP_400_BAD_REQUEST)
+            if not Admin.validate_email_address(email):
+                return Response({'error':'invalid email address'},status=status.HTTP_400_BAD_REQUEST)
             
-        #     if Admin.objects(email=email).first():
-        #         return Response({'error':'Email already exists'}, status=status.HTTP_400_BAD_REQUEST)
+            if Admin.objects(email=email).first():
+                return Response({'error':'Email already exists'}, status=status.HTTP_400_BAD_REQUEST)
             
-        #     admin=Admin(
-        #         fullname=fullname,
-        #         email=email
-        #     )
-        #     admin.set_password(password)
-        #     admin.save()
+            admin=Admin(
+                fullname=fullname,
+                email=email
+            )
+            admin.set_password(password)
+            admin.save()
             
-        #     return Response({
-        #         'message':'Admin registered successfully',
-        #         'admin':{'fullname':admin.fullname,'email':admin.email}
-        #     }, status=status.HTTP_200_OK)
-        # except Exception as e:
-        #     return Response({'error':str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({
+                'message':'Admin registered successfully',
+                'admin':{'fullname':admin.fullname,'email':admin.email}
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error':str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class AdminsigninView(APIView):
@@ -94,34 +96,33 @@ class AdminsigninView(APIView):
 
 class UserManagementView(APIView):
     @admin_required
-    def get(self, request,pk):
+    def get(self, request, pk):
         try:
+            # Verify admin exists (handled by decorator)
             users = User.objects().all()
-            user_list = [{
-                'id': str(user.id),
-                'full_name': user.full_name,
-                'email': user.email,
-                'phone_number': user.phone_number,
-                'country_code': user.country_code,
-                'is_active': user.is_active,
-                'joined_date': user.created_at.strftime('%Y-%m-%d')
-            } for user in users]
-
-            return Response({'users': user_list})
-
+            serializer = UserManagementSerializer(users, many=True)
+            return Response({'users': serializer.data})
         except Exception as e:
             return Response({'error': str(e)}, 
                           status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     @admin_required
-    def post(self, request,pk):
+    def post(self, request, pk):
         try:
+            # Verify admin exists (handled by decorator)
             data = request.data
+            serializer = UserManagementSerializer(data=data)
+            
+            if not serializer.is_valid():
+                return Response(serializer.errors, 
+                              status=status.HTTP_400_BAD_REQUEST)
+                
             user = User(
+                profile=data.get('profile'),
                 full_name=data['full_name'],
                 phone_number=data['phone_number'],
                 country_code=data['country_code'],
-                email=data['email'],
-                profile=data['profile']
+                email=data['email']
             )
             user.set_password(data['password'], data['password'])
             user.clean()
@@ -135,15 +136,28 @@ class UserManagementView(APIView):
         except Exception as e:
             return Response({'error': str(e)}, 
                           status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     @admin_required
-    def put(self, request,):
+    def put(self, request, pk):
         try:
-            user = User.objects(id=pk).first()
+            # Verify admin exists (handled by decorator)
+            user_id = request.data.get('user_id')  # Get user_id from request data
+            if not user_id:
+                return Response({'error': 'user_id is required'}, 
+                              status=status.HTTP_400_BAD_REQUEST)
+                
+            user = User.objects(id=user_id).first()
             if not user:
                 return Response({'error': 'User not found'}, 
                               status=status.HTTP_404_NOT_FOUND)
 
             data = request.data
+            serializer = UserManagementSerializer(user, data=data, partial=True)
+            
+            if not serializer.is_valid():
+                return Response(serializer.errors, 
+                              status=status.HTTP_400_BAD_REQUEST)
+
             if 'full_name' in data:
                 user.full_name = data['full_name']
             if 'phone_number' in data:
@@ -162,15 +176,25 @@ class UserManagementView(APIView):
             user.clean()
             user.save()
 
-            return Response({'message': 'User updated successfully'})
+            return Response({
+                'message': 'User updated successfully',
+                'user': serializer.data
+            })
 
         except Exception as e:
             return Response({'error': str(e)}, 
                           status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     @admin_required
     def delete(self, request, pk):
         try:
-            user = User.objects(id=pk).first()
+            # Verify admin exists (handled by decorator)
+            user_id = request.data.get('user_id')  # Get user_id from request data
+            if not user_id:
+                return Response({'error': 'user_id is required'}, 
+                              status=status.HTTP_400_BAD_REQUEST)
+                
+            user = User.objects(id=user_id).first()
             if not user:
                 return Response({'error': 'User not found'}, 
                               status=status.HTTP_404_NOT_FOUND)
