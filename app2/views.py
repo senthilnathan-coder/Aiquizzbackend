@@ -7,6 +7,7 @@ from rest_framework import status
 from app.models import *
 from app2.models import *
 from mongoengine import DoesNotExist,ValidationError
+from app2.serializers import *
 
 from functools import wraps
 
@@ -24,35 +25,44 @@ def admin_required(func):
 
 class AdminsignupView(APIView):
     def post(self,request):
-        try:
-            data=request.data
+        # try:
+        #     data=request.data
+        #     serializer=AdminSerializer(data=data)
             
-            fullname=data.get('fullname')
-            email=data.get('email')
-            password=data.get('password')
+        #     if serializer.is_valid():
+        #         admin=Admin(
+        #             fullname=data['fullname'],
+        #             email=data['email']
+        #         )
+        # try:
+        #     data=request.data
             
-            if not all([fullname,email,password]):
-                return Response({'error':'All fields are required'}, status=status.HTTP_400_BAD_REQUEST)
+        #     fullname=data.get('fullname')
+        #     email=data.get('email')
+        #     password=data.get('password')
+            
+        #     if not all([fullname,email,password]):
+        #         return Response({'error':'All fields are required'}, status=status.HTTP_400_BAD_REQUEST)
 
-            if not Admin.validate_email_address(email):
-                return Response({'error':'invalid email address'},status=status.HTTP_400_BAD_REQUEST)
+        #     if not Admin.validate_email_address(email):
+        #         return Response({'error':'invalid email address'},status=status.HTTP_400_BAD_REQUEST)
             
-            if Admin.objects(email=email).first():
-                return Response({'error':'Email already exists'}, status=status.HTTP_400_BAD_REQUEST)
+        #     if Admin.objects(email=email).first():
+        #         return Response({'error':'Email already exists'}, status=status.HTTP_400_BAD_REQUEST)
             
-            admin=Admin(
-                fullname=fullname,
-                email=email
-            )
-            admin.set_password(password)
-            admin.save()
+        #     admin=Admin(
+        #         fullname=fullname,
+        #         email=email
+        #     )
+        #     admin.set_password(password)
+        #     admin.save()
             
-            return Response({
-                'message':'Admin registered successfully',
-                'admin':{'fullname':admin.fullname,'email':admin.email}
-            }, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({'error':str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        #     return Response({
+        #         'message':'Admin registered successfully',
+        #         'admin':{'fullname':admin.fullname,'email':admin.email}
+        #     }, status=status.HTTP_200_OK)
+        # except Exception as e:
+        #     return Response({'error':str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class AdminsigninView(APIView):

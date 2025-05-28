@@ -325,6 +325,7 @@ class MultimodalQuizView(APIView):
                 url = request.POST.get('url')
                 difficulty = request.POST.get('difficulty', 'medium')
                 question_type = request.POST.get('question_type', 'mcq')
+                number_questions=int(request.POST.get('number_questions',10))
             else:
                 content_text = request.data.get('content', '')
                 image = None
@@ -337,6 +338,7 @@ class MultimodalQuizView(APIView):
                 url = request.data.get('url')
                 difficulty = request.data.get('difficulty', 'medium')
                 question_type = request.data.get('question_type', 'mcq')
+                number_questions=int(request.POST.get('number_questions',10))
 
             if not any([content_text.strip(), image, audio, video, pdf, word, ppt, excel, url]):
                 return Response({
@@ -365,7 +367,7 @@ class MultimodalQuizView(APIView):
                 You're an AI quiz generator.
                 {difficulty_instructions[difficulty]}
                 Based on the following content, first identify the main topic of the content.
-                Then generate 10 multiple choice questions with 4 options related to that topic.
+                Then generate {number_questions} questions with 4 options related to that topic.
                 Format strictly like:
                 Topic: <main_topic>
                 
@@ -383,7 +385,7 @@ class MultimodalQuizView(APIView):
                 You're an AI quiz generator.
                 {difficulty_instructions[difficulty]}
                 Based on the following content, first identify the main topic of the content.
-                Then generate 10 true/false questions related to that topic.
+                Then generate {number_questions} true/false questions related to that topic.
                 Format strictly like:
                 Topic: <main_topic>
                 
