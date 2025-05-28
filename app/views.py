@@ -539,6 +539,7 @@ class MultimodalQuizView(APIView):
                 user_points.save()
             
             # When quiz is submitted
+            # Inside MultimodalQuizView.post method, in the quiz submission section
             if request.data.get('submitted') or (is_multipart and request.POST.get('submitted')):
                 # Create quiz
                 quiz_data = {
@@ -556,10 +557,27 @@ class MultimodalQuizView(APIView):
                     return Response(quiz_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
                 quiz = quiz_serializer.save()
                 
-                # Create quiz attempt
-                user_answers = request.data.get('user_answers', []) if not is_multipart else \
-                              [request.POST.get(f'question_{i}') for i in range(len(questions))]
+                # Get user answers based on request type
+                if is_multipart:
+                    user_answers = []
+                    for i in range(len(questions)):
+                        answer = request.POST.get(f'question_{i}')
+                        if answer is None:  # Handle missing answers
+                            return Response({
+                                'error': 'All questions must be answered',
+                                'question_number': i + 1
+                            }, status=status.HTTP_400_BAD_REQUEST)
+                        user_answers.append(answer)
+                else:
+                    user_answers = request.data.get('user_answers')
+                    if not user_answers or len(user_answers) != len(questions):
+                        return Response({
+                            'error': 'Invalid or missing user answers',
+                            'expected_answers': len(questions),
+                            'received_answers': len(user_answers) if user_answers else 0
+                        }, status=status.HTTP_400_BAD_REQUEST)
                 
+                # Calculate score
                 score = sum(1 for i, q in enumerate(questions) if user_answers[i] == q['answer'])
                 
                 quiz_attempt_data = {
@@ -577,33 +595,33 @@ class MultimodalQuizView(APIView):
                 
                 quiz_attempt_serializer = QuizAttemptSerializer(data=quiz_attempt_data)
                 if not quiz_attempt_serializer.is_valid():
+                    # Delete the created quiz since attempt failed
+                    quiz.delete()
                     return Response({
                         'error': 'Quiz submission validation failed',
                         'details': quiz_attempt_serializer.errors
                     }, status=status.HTTP_400_BAD_REQUEST)
                 
-                quiz_attempt = quiz_attempt_serializer.save()
-                
-                # The QuizAttempt.save() method will automatically:
-                # 1. Calculate accuracy and points
-                # 2. Update user streak
-                # 3. Update user points
-                # 4. Identify weak topics
-                # 5. Calculate rank and percentile
-                
-                # Inside MultimodalQuizView.post method, replace the final return Response with:
-                return Response({
-                    'message': 'Quiz submitted successfully',
-                    'quiz_id': str(quiz.id),
-                    'attempt_id': str(quiz_attempt.id),
-                    'score': score,
-                    'total': len(questions),
-                    'accuracy': quiz_attempt.accuracy,
-                    'points_earned': quiz_attempt.points_earned,
-                    'topics': quiz_attempt.topics,
-                    'weak_topics': quiz_attempt.weak_topics,
-                    'status': 'success'
-                })
+                try:
+                    quiz_attempt = quiz_attempt_serializer.save()
+                    return Response({
+                        'message': 'Quiz submitted successfully',
+                        'quiz_id': str(quiz.id),
+                        'attempt_id': str(quiz_attempt.id),
+                        'score': score,
+                        'total': len(questions),
+                        'accuracy': quiz_attempt.accuracy,
+                        'points_earned': quiz_attempt.points_earned,
+                        'topics': quiz_attempt.topics,
+                        'weak_topics': quiz_attempt.weak_topics,
+                        'status': 'success'
+                    }, status=status.HTTP_201_CREATED)
+                except Exception as e:
+                    # Delete the created quiz if attempt save fails
+                    quiz.delete()
+                    return Response({
+                        'error': f'Failed to save quiz attempt: {str(e)}'
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                    
             else:
                 # Return questions without saving quiz or attempt
