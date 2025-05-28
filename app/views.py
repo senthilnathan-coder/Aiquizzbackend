@@ -577,7 +577,10 @@ class MultimodalQuizView(APIView):
                 
                 quiz_attempt_serializer = QuizAttemptSerializer(data=quiz_attempt_data)
                 if not quiz_attempt_serializer.is_valid():
-                    return Response(quiz_attempt_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                    return Response({
+                        'error': 'Quiz submission validation failed',
+                        'details': quiz_attempt_serializer.errors
+                    }, status=status.HTTP_400_BAD_REQUEST)
                 
                 quiz_attempt = quiz_attempt_serializer.save()
                 
