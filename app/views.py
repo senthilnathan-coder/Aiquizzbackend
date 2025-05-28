@@ -325,7 +325,7 @@ class MultimodalQuizView(APIView):
                 url = request.POST.get('url')
                 difficulty = request.POST.get('difficulty', 'medium')
                 question_type = request.POST.get('question_type', 'mcq')
-                number_questions=int(request.POST.get('number_questions',10))
+                number_questions = int(request.POST.get('number_questions', 10))
             else:
                 content_text = request.data.get('content', '')
                 image = None
@@ -338,7 +338,7 @@ class MultimodalQuizView(APIView):
                 url = request.data.get('url')
                 difficulty = request.data.get('difficulty', 'medium')
                 question_type = request.data.get('question_type', 'mcq')
-                number_questions=int(request.POST.get('number_questions',10))
+                number_questions = int(request.data.get('number_questions', 10))  # Fixed this line
 
             if not any([content_text.strip(), image, audio, video, pdf, word, ppt, excel, url]):
                 return Response({
@@ -357,7 +357,7 @@ class MultimodalQuizView(APIView):
 
             # Generate quiz prompt based on difficulty and question type
             difficulty_instructions = {
-                'easy': 'Generate basic, straightforward questions suitable for beginners.',
+                'easy': 'Generate basic, straightforward questions suitable for beginners.and do not send reapeted questions',
                 'medium': 'Generate moderately challenging questions that require good understanding.',
                 'hard': 'Generate complex questions that require deep understanding and critical thinking.'
             }
@@ -521,6 +521,7 @@ class MultimodalQuizView(APIView):
                 'user': str(user.id),
                 'title': f"{difficulty.capitalize()} {question_type.upper()} Quiz",
                 'questions': questions,
+                'number_questions':number_questions,
                 'difficulty': difficulty,
                 'question_type': question_type,
                 'content_type': content_type,
@@ -545,6 +546,7 @@ class MultimodalQuizView(APIView):
                     'user': str(user.id),
                     'title': f"{difficulty.capitalize()} {question_type.upper()} Quiz",
                     'questions': questions,
+                    'number_questions':number_questions,
                     'difficulty': difficulty,
                     'question_type': question_type,
                     'content_type': content_type,
@@ -583,6 +585,7 @@ class MultimodalQuizView(APIView):
                     'user': str(user.id),
                     'quiz': str(quiz.id),
                     'questions': questions,
+                    'number_questions':number_questions,
                     'user_answers': user_answers,
                     'score': score,
                     'total': len(questions),
