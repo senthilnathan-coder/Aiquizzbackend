@@ -12,6 +12,8 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 from pathlib import Path
 
+import pymongo.mongo_client
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -89,6 +91,43 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'AIgemini.wsgi.application'
 
+# from mongoengine import connect
+# from pymongo.errors import ServerSelectionTimeoutError
+# import pymongo
+
+# MONGODB_SETTINGS = {
+#     'db': 'demo',
+#     'host': 'localhost',
+#     'port': 27017,
+#     # 'username': 'your_user',
+#     # 'password': 'your_password',
+#     # 'authentication_source': 'admin',
+# }
+
+# try:
+
+#     connect(
+#         db=MONGODB_SETTINGS['db'],
+#         host=MONGODB_SETTINGS['host'],
+#         port=MONGODB_SETTINGS['port'],
+#         # username=MONGODB_SETTINGS.get('username'),
+#         # password=MONGODB_SETTINGS.get('password'),
+#         # authentication_source=MONGODB_SETTINGS.get('authentication_source'),
+#         serverSelectionTimeoutMS=3000  # Timeout in milliseconds
+#     )
+    
+
+#     client = pymongo.MongoClient(
+#         host=MONGODB_SETTINGS['host'],
+#         port=MONGODB_SETTINGS['port'],
+#         serverSelectionTimeoutMS=3000
+#     )
+#     client.admin.command('ping')
+#     print("✅ MongoDB connected successfully!")
+
+# except ServerSelectionTimeoutError:
+#     print("❌ MongoDB connection failed.")
+
 from mongoengine import connect
 from pymongo.errors import ServerSelectionTimeoutError
 import pymongo
@@ -105,7 +144,7 @@ MONGODB_URI = "mongodb+srv://admin:Pass123@cluster0.2fnzdxx.mongodb.net/DIGAIQUE
 # }
 
 MONGODB_SETTINGS = {
-    'db': 'DIGAIQUEST',
+    'db': 'DIGIAIQUEST',
     'host': MONGODB_URI,
 }
 
@@ -163,16 +202,6 @@ DATABASES = {
     }
 }
 
-# Database
-# https://docs.djangoproject.com/en/4.2/ref/settings/#databases
-
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.sqlite3',
-#         'NAME': BASE_DIR / 'db.sqlite3',
-#     }
-# }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
@@ -208,7 +237,7 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
@@ -216,3 +245,16 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Add REST Framework settings
+
+
+
+
+from django.db import connections
+from django.db.utils import OperationalError
+
+try:
+    connections['default'].cursor()
+    print("✅ MongoDB connected successfully!")
+except OperationalError as e:
+    print(f"❌ MongoDB connection failed: {e}")
+

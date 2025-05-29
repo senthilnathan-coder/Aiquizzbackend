@@ -325,6 +325,7 @@ class MultimodalQuizView(APIView):
                 url = request.POST.get('url')
                 difficulty = request.POST.get('difficulty', 'medium')
                 question_type = request.POST.get('question_type', 'mcq')
+                number_questions = int(request.POST.get('number_questions', 10))
             else:
                 content_text = request.data.get('content', '')
                 image = None
@@ -337,6 +338,7 @@ class MultimodalQuizView(APIView):
                 url = request.data.get('url')
                 difficulty = request.data.get('difficulty', 'medium')
                 question_type = request.data.get('question_type', 'mcq')
+                number_questions = int(request.data.get('number_questions', 10))  # Fixed this line
 
             if not any([content_text.strip(), image, audio, video, pdf, word, ppt, excel, url]):
                 return Response({
@@ -355,7 +357,7 @@ class MultimodalQuizView(APIView):
 
             # Generate quiz prompt based on difficulty and question type
             difficulty_instructions = {
-                'easy': 'Generate basic, straightforward questions suitable for beginners.',
+                'easy': 'Generate basic, straightforward questions suitable for beginners.and do not send reapeted questions',
                 'medium': 'Generate moderately challenging questions that require good understanding.',
                 'hard': 'Generate complex questions that require deep understanding and critical thinking.'
             }
@@ -365,7 +367,7 @@ class MultimodalQuizView(APIView):
                 You're an AI quiz generator.
                 {difficulty_instructions[difficulty]}
                 Based on the following content, first identify the main topic of the content.
-                Then generate 10 multiple choice questions with 4 options related to that topic.
+                Then generate {number_questions} questions with 4 options related to that topic.
                 Format strictly like:
                 Topic: <main_topic>
                 
@@ -383,7 +385,7 @@ class MultimodalQuizView(APIView):
                 You're an AI quiz generator.
                 {difficulty_instructions[difficulty]}
                 Based on the following content, first identify the main topic of the content.
-                Then generate 10 true/false questions related to that topic.
+                Then generate {number_questions} true/false questions related to that topic.
                 Format strictly like:
                 Topic: <main_topic>
                 
@@ -519,30 +521,32 @@ class MultimodalQuizView(APIView):
                 'user': str(user.id),
                 'title': f"{difficulty.capitalize()} {question_type.upper()} Quiz",
                 'questions': questions,
+                'number_questions':number_questions,
                 'difficulty': difficulty,
                 'question_type': question_type,
                 'content_type': content_type,
                 'topics': [main_topic]  # Use a single topic instead of collecting from all questions
             }
             
-            # Initialize user data if not exists
-            user_streak = UserStreak.objects(user=user).first()
-            if not user_streak:
-                user_streak = UserStreak(user=user)
-                user_streak.save()
-            
-            user_points = UserPoints.objects(user=user).first()
-            if not user_points:
-                user_points = UserPoints(user=user)
-                user_points.save()
-            
             # When quiz is submitted
             if request.data.get('submitted') or (is_multipart and request.POST.get('submitted')):
+                # Initialize user data if not exists
+                user_streak = UserStreak.objects(user=user).first()
+                if not user_streak:
+                    user_streak = UserStreak(user=user)
+                    user_streak.save()
+                
+                user_points = UserPoints.objects(user=user).first()
+                if not user_points:
+                    user_points = UserPoints(user=user)
+                    user_points.save()
+                
                 # Create quiz
                 quiz_data = {
                     'user': str(user.id),
                     'title': f"{difficulty.capitalize()} {question_type.upper()} Quiz",
                     'questions': questions,
+                    'number_questions':number_questions,
                     'difficulty': difficulty,
                     'question_type': question_type,
                     'content_type': content_type,
@@ -554,16 +558,34 @@ class MultimodalQuizView(APIView):
                     return Response(quiz_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
                 quiz = quiz_serializer.save()
                 
-                # Create quiz attempt
-                user_answers = request.data.get('user_answers', []) if not is_multipart else \
-                              [request.POST.get(f'question_{i}') for i in range(len(questions))]
+                # Get user answers based on request type
+                if is_multipart:
+                    user_answers = []
+                    for i in range(len(questions)):
+                        answer = request.POST.get(f'question_{i}')
+                        if answer is None:  # Handle missing answers
+                            return Response({
+                                'error': 'All questions must be answered',
+                                'question_number': i + 1
+                            }, status=status.HTTP_400_BAD_REQUEST)
+                        user_answers.append(answer)
+                else:
+                    user_answers = request.data.get('user_answers')
+                    if not user_answers or len(user_answers) != len(questions):
+                        return Response({
+                            'error': 'Invalid or missing user answers',
+                            'expected_answers': len(questions),
+                            'received_answers': len(user_answers) if user_answers else 0
+                        }, status=status.HTTP_400_BAD_REQUEST)
                 
+                # Calculate score
                 score = sum(1 for i, q in enumerate(questions) if user_answers[i] == q['answer'])
                 
                 quiz_attempt_data = {
                     'user': str(user.id),
                     'quiz': str(quiz.id),
                     'questions': questions,
+                    'number_questions':number_questions,
                     'user_answers': user_answers,
                     'score': score,
                     'total': len(questions),
@@ -575,27 +597,34 @@ class MultimodalQuizView(APIView):
                 
                 quiz_attempt_serializer = QuizAttemptSerializer(data=quiz_attempt_data)
                 if not quiz_attempt_serializer.is_valid():
-                    return Response(quiz_attempt_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                    # Delete the created quiz since attempt failed
+                    quiz.delete()
+                    return Response({
+                        'error': 'Quiz submission validation failed',
+                        'details': quiz_attempt_serializer.errors
+                    }, status=status.HTTP_400_BAD_REQUEST)
                 
-                quiz_attempt = quiz_attempt_serializer.save()
-                
-                # The QuizAttempt.save() method will automatically:
-                # 1. Calculate accuracy and points
-                # 2. Update user streak
-                # 3. Update user points
-                # 4. Identify weak topics
-                # 5. Calculate rank and percentile
-                
-                return Response({
-                    'quiz_id': str(quiz.id),
-                    'attempt_id': str(quiz_attempt.id),
-                    'score': score,
-                    'total': len(questions),
-                    'accuracy': quiz_attempt.accuracy,
-                    'points_earned': quiz_attempt.points_earned,
-                    'topics': quiz_attempt.topics,
-                    'weak_topics': quiz_attempt.weak_topics
-                })
+                try:
+                    quiz_attempt = quiz_attempt_serializer.save()
+                    return Response({
+                        'message': 'Quiz submitted successfully',
+                        'quiz_id': str(quiz.id),
+                        'attempt_id': str(quiz_attempt.id),
+                        'score': score,
+                        'total': len(questions),
+                        'accuracy': quiz_attempt.accuracy,
+                        'points_earned': quiz_attempt.points_earned,
+                        'topics': quiz_attempt.topics,
+                        'weak_topics': quiz_attempt.weak_topics,
+                        'status': 'success'
+                    }, status=status.HTTP_201_CREATED)
+                except Exception as e:
+                    # Delete the created quiz if attempt save fails
+                    quiz.delete()
+                    return Response({
+                        'error': f'Failed to save quiz attempt: {str(e)}'
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                   
             else:
                 # Return questions without saving quiz or attempt
                 return Response({
@@ -627,14 +656,20 @@ class UserSignupView(APIView):
                     country_code=data['country_code'],
                     email=data['email']
                 )
-                
+                if not all(['profile','full_name','email','phone_number','password','confirm_password','country_code',]):
+                    return Response({'error':'All fields are required'})
                 # Set password
                 user.set_password(data['password'], data['confirm_password'])
                 user.save()
                 
+         
                 return Response({
                     'message': 'User created successfully',
-                    'user_id': str(user.id)
+                    'user_id': str(user.id),
+                    'full_name':user.full_name,
+                    'phone_number':user.phone_number,
+                    'email':user.email
+                    
                 }, status=status.HTTP_201_CREATED)
             
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -725,6 +760,19 @@ class FeedbackView(APIView):
     def post(self, request, pk):
         try:
             user = User.objects.get(id=pk)
+            # data=request.data
+            # serializer=FeedbackSerializer(data=data)
+            
+            # if serializer.is_valid():
+            #     feedback_data=Feedback(
+            #         user=data['user'],
+            #         type=data['type'],
+            #         title=data['title'],
+            #         describtion=data['describtion'],
+            #         status=data['status']
+                    
+            #     )
+            #     feedback_data.save()
             
             feedback_data = {
                 'user': user.full_name,
@@ -740,7 +788,11 @@ class FeedbackView(APIView):
             
             return Response({
                 'message': 'Feedback submitted successfully',
-                'feedback_id': str(feedback.id)
+                'feedback_id': str(feedback_data
+                                   
+                                   
+                                   
+                                   .id)
             }, status=status.HTTP_201_CREATED)
         except User.DoesNotExist:
             return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)

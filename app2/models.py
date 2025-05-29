@@ -11,6 +11,7 @@ class Admin(Document):
     email = EmailField(required=True)
     password_hash = StringField(required=True)  # Changed from password to password_hash
     is_active = BooleanField(default=True)
+    role=StringField(required=True,choices=['admin','super_admin'],default='admin')
     created_at = DateTimeField(default=datetime.utcnow)
     last_login = DateTimeField(default=datetime.utcnow)
     
