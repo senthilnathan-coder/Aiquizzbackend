@@ -334,20 +334,56 @@ class MultimodalQuizView(APIView):
                 # Track which content types are provided
                 if content_text and content_text.strip():
                     content_types.append('text')
+                    combined_text += content_text + "\n"
                 if image:
                     content_types.append('image')
+                    
                 if audio:
-                    content_types.append('audio')
+                    try:
+                     audio_text = transcribe_audio(audio)
+                     content_types.append('audio')
+                     combined_text += audio_text + "\n"
+                    except Exception as e:
+                        print(f"Audio transcription error: {str(e)}")
+
                 if video:
-                    content_types.append('video')
+                    try:
+                     video, _ = extract_frame(video)
+                     content_types.append('video')
+                    # Process video frame if needed
+                    except Exception as e:
+                        print(f"Video processing error: {str(e)}")
+
+                
                 if pdf:
-                    content_types.append('pdf')
+                    try:
+                     pdf_text = extract_pdf_text(pdf)
+                     content_types.append('pdf')
+                     combined_text += pdf_text + "\n"
+                    except Exception as e:
+                        print(f"PDF extraction error: {str(e)}")
                 if word:
-                    content_types.append('word')
+                    try:
+                     word_text = extract_word_text(word)
+                     content_types.append('word')
+                     combined_text += word_text + "\n"
+                    except Exception as e:
+                        print(f"Word extraction error: {str(e)}")
+                
                 if ppt:
-                    content_types.append('ppt')
+                    try:
+                     ppt_text = extract_ppt_text(ppt)
+                     content_types.append('ppt')
+                     combined_text += ppt_text + "\n"
+                    except Exception as e:
+                        print(f"PowerPoint extraction error: {str(e)}")
                 if excel:
-                    content_types.append('excel')
+                    try:
+                     excel_text = extract_excel_text(excel)
+                     content_types.append('excel')
+                     combined_text += excel_text + "\n"
+                    except Exception as e:
+                        print(f"Excel extraction error: {str(e)}")
                 if url:
                     content_types.append('url')
     
@@ -815,7 +851,3 @@ class FeedbackView(APIView):
             return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
-
-        
-    
