@@ -76,7 +76,7 @@ ROOT_URLCONF = 'AIgemini.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [os.path.join(BASE_DIR,'templates')],
+        'DIRS': [],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -249,12 +249,12 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
 
-from django.db import connections
-from django.db.utils import OperationalError
+# from django.db import connections
+# from django.db.utils import OperationalError
 
-try:
-    connections['default'].cursor()
-    print("✅ MongoDB connected successfully!")
-except OperationalError as e:
-    print(f"❌ MongoDB connection failed: {e}")
+# try:
+#     connections['default'].cursor()
+#     print("✅ MongoDB connected successfully!")
+# except OperationalError as e:
+#     print(f"❌ MongoDB connection failed: {e}")
 
