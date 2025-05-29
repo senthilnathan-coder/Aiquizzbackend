@@ -312,6 +312,9 @@ class MultimodalQuizView(APIView):
             
             content_type = request.headers.get('Content-Type', '')
             is_multipart = 'multipart/form-data' in content_type.lower()
+            
+            # Initialize content types list to track what's being submitted
+            content_types = []
 
             if is_multipart:
                 content_text = request.POST.get('content', '')
@@ -517,19 +520,21 @@ class MultimodalQuizView(APIView):
             main_topic = questions[0].get('topic', 'general')
             
             # Prepare quiz data
-            quiz_data = {
-                'user': str(user.id),
-                'title': f"{difficulty.capitalize()} {question_type.upper()} Quiz",
-                'questions': questions,
-                'number_questions':number_questions,
-                'difficulty': difficulty,
-                'question_type': question_type,
-                'content_type': content_type,
-                'topics': [main_topic]  # Use a single topic instead of collecting from all questions
-            }
+            # quiz_data = {
+            #     'user': str(user.id),
+            #     'title': f"{difficulty.capitalize()} {question_type.upper()} Quiz",
+            #     'questions': questions,
+            #     'number_questions':number_questions,
+            #     'difficulty': difficulty,
+            #     'question_type': question_type,
+            #     'content_type': content_type,
+            #     'topics': [main_topic]  # Use a single topic instead of collecting from all questions
+            # }
             
             # When quiz is submitted
             if request.data.get('submitted') or (is_multipart and request.POST.get('submitted')):
+            
+                
                 # Initialize user data if not exists
                 user_streak = UserStreak.objects(user=user).first()
                 if not user_streak:
@@ -546,10 +551,10 @@ class MultimodalQuizView(APIView):
                     'user': str(user.id),
                     'title': f"{difficulty.capitalize()} {question_type.upper()} Quiz",
                     'questions': questions,
-                    'number_questions':number_questions,
+                    'number_questions': number_questions,
                     'difficulty': difficulty,
                     'question_type': question_type,
-                    'content_type': content_type,
+                    'content_type': content_types,  # Use the tracked content types
                     'topics': [main_topic]
                 }
                 
@@ -592,7 +597,7 @@ class MultimodalQuizView(APIView):
                     'difficulty': difficulty,
                     'question_type': question_type,
                     'topics': [main_topic],
-                    'content_types': content_type
+                    'content_types': content_types  # Use the tracked content types
                 }
                 
                 quiz_attempt_serializer = QuizAttemptSerializer(data=quiz_attempt_data)
@@ -640,7 +645,7 @@ class MultimodalQuizView(APIView):
             return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+ 
 class UserSignupView(APIView):
     def post(self, request):
         try:

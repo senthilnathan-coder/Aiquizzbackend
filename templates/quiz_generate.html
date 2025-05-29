@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generate and Submit Quiz</title>
+</head>
+<body>
+    <h2>Generate Quiz</h2>
+    <form method="POST" action="/quiz/{{ user.id }}/" enctype="multipart/form-data" id="quizForm">
+        {% csrf_token %}
+        {% if not questions %}
+        <div>
+            <label for="content">Content:</label>
+            <textarea name="content" id="content" rows="4" cols="50" required></textarea>
+        </div>
+        
+        <div>
+            <label for="difficulty">Difficulty:</label>
+            <select name="difficulty" id="difficulty" required>
+                <option value="easy">Easy</option>
+                <option value="medium" selected>Medium</option>
+                <option value="hard">Hard</option>
+            </select>
+        </div>
+        
+        <div>
+            <label for="question_type">Question Type:</label>
+            <select name="question_type" id="question_type" required>
+                <option value="mcq" selected>Multiple Choice</option>
+                <option value="true_false">True/False</option>
+            </select>
+        </div>
+        
+        <div>
+            <label for="number_questions">Number of Questions:</label>
+            <input type="number" name="number_questions" id="number_questions" value="10" min="1" max="20" required>
+        </div>
+        
+        <div>
+            <label for="file">Upload File (Optional):</label>
+            <input type="file" name="file" id="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx">
+        </div>
+        
+        <div>
+            <label for="url">URL (Optional):</label>
+            <input type="url" name="url" id="url">
+        </div>
+        
+        <button type="submit">Generate Quiz</button>
+        {% else %}
+        <h3>{{ quiz_title }}</h3>
+        {% for question in questions %}
+        <div class="question">
+            <p><strong>Question {{ forloop.counter }}:</strong> {{ question.question }}</p>
+            {% for option in question.options %}
+            <div>
+                <input type="radio" 
+                       name="question_{{ forloop.parentloop.counter0 }}" 
+                       id="q{{ forloop.parentloop.counter0 }}_{{ forloop.counter0 }}" 
+                       value="{{ option }}" 
+                       required>
+                <label for="q{{ forloop.parentloop.counter0 }}_{{ forloop.counter0 }}">{{ option }}</label>
+            </div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+        <!-- Preserve the original content and settings -->
+        <input type="hidden" name="content" value="{{ content_text }}">
+        <input type="hidden" name="difficulty" value="{{ difficulty }}">
+        <input type="hidden" name="question_type" value="{{ question_type }}">
+        <input type="hidden" name="number_questions" value="{{ number_questions }}">
+        <input type="hidden" name="submitted" value="true">
+        <button type="submit">Submit Quiz</button>
+        {% endif %}
+    </form>
+</body>
+</html>

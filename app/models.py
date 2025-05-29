@@ -156,7 +156,7 @@ class QuizAttempt(Document):
     user = ReferenceField('User', required=True)
     quiz = ReferenceField('Quiz', required=True)  # Reference to the original quiz
     questions = ListField(DictField(), required=True)
-    number_questons=IntField(required=True)
+    number_questions=IntField(required=True)
     user_answers = ListField(StringField())
     score = IntField(required=True)
     total = IntField(required=True)
@@ -171,7 +171,7 @@ class QuizAttempt(Document):
     weak_topics = ListField(StringField())  # Topics where accuracy < 60%
     rank = IntField()  # User's rank at the time of attempt
     percentile = FloatField()  # User's percentile ranking
-    # time_taken = IntField()  # Time taken in seconds
+    time_taken = IntField()  # Time taken in seconds
     content_types = ListField(StringField())  # Types of content in the quiz
 
     meta = {
