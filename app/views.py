@@ -295,21 +295,6 @@ class MultimodalQuizView(APIView):
             # Get user by pk
             user = User.objects.get(id=pk)
             
-            # Check for valid payment first
-            # user = request.user
-            # valid_payment = Payment.objects.filter(
-            #     user=user,
-            #     status='success',
-            #     attempts_remaining__gt=0
-            # ).first()
-            
-            # if not valid_payment:
-            #     return Response({
-            #         'error': 'No valid payment found. Please purchase quiz attempts.'
-            #     }, status=status.HTTP_402_PAYMENT_REQUIRED)
-
-            # # Handle multipart form data or JSON
-            
             content_type = request.headers.get('Content-Type', '')
             is_multipart = 'multipart/form-data' in content_type.lower()
             
@@ -331,21 +316,41 @@ class MultimodalQuizView(APIView):
                 number_questions = int(request.POST.get('number_questions', 10))
             else:
                 content_text = request.data.get('content', '')
-                image = None
-                audio = None
-                video = None
-                pdf = None
-                word = None
-                ppt = None
-                excel = None
+                image = request.data.get('image')
+                audio = request.data.get('audio')
+                video = request.data.get('video')
+                pdf = request.data.get('pdf')
+                word = request.data.get('word')
+                ppt = request.data.get('ppt')
+                excel = request.data.get('excel')
                 url = request.data.get('url')
                 difficulty = request.data.get('difficulty', 'medium')
                 question_type = request.data.get('question_type', 'mcq')
-                number_questions = int(request.data.get('number_questions', 10))  # Fixed this line
+                number_questions = int(request.data.get('number_questions', 10))
 
-            if not any([content_text.strip(), image, audio, video, pdf, word, ppt, excel, url]):
+            # Track which content types are provided
+            if content_text and content_text.strip():
+                content_types.append('text')
+            if image:
+                content_types.append('image')
+            if audio:
+                content_types.append('audio')
+            if video:
+                content_types.append('video')
+            if pdf:
+                content_types.append('pdf')
+            if word:
+                content_types.append('word')
+            if ppt:
+                content_types.append('ppt')
+            if excel:
+                content_types.append('excel')
+            if url:
+                content_types.append('url')
+
+            if not content_types:
                 return Response({
-                    'error': 'Please provide at least one type of content (text/image/audio/video/pdf/word/ppt/excel/url)'
+                    'error': 'Please provide content, file, or URL'
                 }, status=status.HTTP_400_BAD_REQUEST)
 
             if difficulty not in ['easy', 'medium', 'hard']:
@@ -554,7 +559,7 @@ class MultimodalQuizView(APIView):
                     'number_questions': number_questions,
                     'difficulty': difficulty,
                     'question_type': question_type,
-                    'content_type': content_types,  # Use the tracked content types
+                    'content_type': content_types,  # Use the tracked content types list
                     'topics': [main_topic]
                 }
                 
@@ -597,7 +602,7 @@ class MultimodalQuizView(APIView):
                     'difficulty': difficulty,
                     'question_type': question_type,
                     'topics': [main_topic],
-                    'content_types': content_types  # Use the tracked content types
+                    'content_types': content_types  # Use the tracked content types list
                 }
                 
                 quiz_attempt_serializer = QuizAttemptSerializer(data=quiz_attempt_data)
