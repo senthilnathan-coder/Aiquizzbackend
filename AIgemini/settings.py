@@ -35,6 +35,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+MONGODB_URI=os.getenv("MONGODB_URI")
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -132,7 +134,7 @@ from mongoengine import connect
 from pymongo.errors import ServerSelectionTimeoutError
 import pymongo
 
-MONGODB_URI = "mongodb+srv://admin:Pass123@cluster0.2fnzdxx.mongodb.net/DIGAIQUEST?retryWrites=true&w=majority&appName=Cluster0"
+
 
 # MONGODB_SETTINGS = {
 #     'db': 'demo',
@@ -249,12 +251,12 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
 
-from django.db import connections
-from django.db.utils import OperationalError
+# from django.db import connections
+# from django.db.utils import OperationalError
 
-try:
-    connections['default'].cursor()
-    print("✅ MongoDB connected successfully!")
-except OperationalError as e:
-    print(f"❌ MongoDB connection failed: {e}")
+# try:
+#     connections['default'].cursor()
+#     print("✅ MongoDB connected successfully!")
+# except OperationalError as e:
+#     print(f"❌ MongoDB connection failed: {e}")
 
