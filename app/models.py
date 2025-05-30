@@ -125,17 +125,7 @@ class UserPoints(Document):
             'level': self.level
         })
 
-class SavedQuiz(Document):
-    user = ReferenceField('User', required=True)
-    quiz_attempt = ReferenceField('QuizAttempt')
-    notes = StringField()
-    saved_at = DateTimeField(default=datetime.utcnow)
-    tags = ListField(StringField())  # For organizing saved quizzes
 
-    meta = {
-        'collection': 'saved_quizzes',
-        'indexes': ['user', 'saved_at', 'tags']
-    }
 
 class Feedback(Document):
     user = ReferenceField('User', required=True)
@@ -167,7 +157,6 @@ class QuizAttempt(Document):
     topics = ListField(StringField())  # Topics covered in this quiz
     accuracy = FloatField()  # Store accuracy percentage
     points_earned = IntField(default=0)
-    review_notes = StringField()
     weak_topics = ListField(StringField())  # Topics where accuracy < 60%
     rank = IntField()  # User's rank at the time of attempt
     percentile = FloatField()  # User's percentile ranking
