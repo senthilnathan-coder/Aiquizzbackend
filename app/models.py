@@ -1,4 +1,3 @@
-
 from mongoengine import Document, StringField, EmailField, BooleanField, DateTimeField, FileField, ReferenceField, ListField, DictField, IntField, FloatField
 from werkzeug.security import generate_password_hash, check_password_hash
 import phonenumbers
@@ -126,17 +125,7 @@ class UserPoints(Document):
             'level': self.level
         })
 
-class SavedQuiz(Document):
-    user = ReferenceField('User', required=True)
-    quiz_attempt = ReferenceField('QuizAttempt')
-    notes = StringField()
-    saved_at = DateTimeField(default=datetime.utcnow)
-    tags = ListField(StringField())  # For organizing saved quizzes
 
-    meta = {
-        'collection': 'saved_quizzes',
-        'indexes': ['user', 'saved_at', 'tags']
-    }
 
 class Feedback(Document):
     user = ReferenceField('User', required=True)
@@ -168,7 +157,6 @@ class QuizAttempt(Document):
     topics = ListField(StringField())  # Topics covered in this quiz
     accuracy = FloatField()  # Store accuracy percentage
     points_earned = IntField(default=0)
-    review_notes = StringField()
     weak_topics = ListField(StringField())  # Topics where accuracy < 60%
     rank = IntField()  # User's rank at the time of attempt
     percentile = FloatField()  # User's percentile ranking
@@ -213,7 +201,7 @@ class QuizAttempt(Document):
         better_scores = QuizAttempt.objects(score__gt=self.score).count()
         total_users = QuizAttempt.objects().distinct('user').count()
         self.rank = better_scores + 1
-        self.percentile = ((total_users - self.rank) / total_users * 100) if total_users > 0 else 0
+        self.percentile = ((total_users - self.rank + 1) / total_users * 100) if total_users > 0 else 0
 
         # Update user points
         user_points = UserPoints.objects(user=self.user).first()

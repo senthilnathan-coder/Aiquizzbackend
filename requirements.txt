@@ -4,3 +4,17 @@ python-magic
 openai-whisper
 moviepy
 python-dotenv
+
+mongoengine>=0.27
+Werkzeug>=2.0
+phonenumbers
+email-validator
+opencv-python
+requests
+beautifulsoup4
+faster-whisper
+PyPDF2
+python-docx
+python-pptx
+openpyxl
+bcrypt>=4.0.1
