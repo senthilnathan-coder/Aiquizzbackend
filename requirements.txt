@@ -16,3 +16,5 @@ python-pptx
 openpyxl
 bcrypt>=4.0.1
 gunicorn==21.2.0 
+django-cors-headers
+requests

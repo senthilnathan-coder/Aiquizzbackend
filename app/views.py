@@ -201,7 +201,14 @@ class MultimodalQuizView(APIView):
 
     def post(self, request, pk):
         try:
-            user = User.objects.get(id=pk)
+            token_key=request.data.get('token')
+            if not token_key:
+                return Response({'message':'Token is required'},status=status.HTTP_400_BAD_REQUEST)
+            token = UserToken.objects.get(token=token_key, user=pk)
+            if token.expires_at < datetime.utcnow():
+                return Response({'error': 'Token has expired'}, status=status.HTTP_401_UNAUTHORIZED)
+
+            user = token.user  # Already validated
             content_type = request.headers.get('Content-Type', '')
             is_multipart = 'multipart/form-data' in content_type.lower()
             

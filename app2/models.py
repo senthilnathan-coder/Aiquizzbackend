@@ -88,7 +88,7 @@ class User(Document):
         
 class UserToken(Document):
     token=StringField(required=True,unique=True)
-    user=ReferenceField('User',required=True)
+    user=ReferenceField(User,required=True)
     create_at=DateTimeField(default=datetime.utcnow)
     expires_at=DateTimeField(required=True)
     
@@ -101,7 +101,7 @@ class UserToken(Document):
     
 
 class Feedback(Document):
-    user = ReferenceField('User', required=True)
+    user = ReferenceField(User, required=True)
     type = StringField(required=True, choices=['feedback', 'issue', 'suggestion'])
     title = StringField(required=True)
     description = StringField(required=True)
