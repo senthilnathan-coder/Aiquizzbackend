@@ -21,7 +21,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-0ck0u=y23^j0j*0lhyx8!bftpo%d^oa!e#3r7_p2akfztl0c=k'
+
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -34,7 +34,7 @@ from dotenv import load_dotenv
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 MONGODB_URI=os.getenv("MONGODB_URI")
-
+SECRET_KEY=os.getenv("SECRET_KEY")
 # Application definition
 
 INSTALLED_APPS = [
