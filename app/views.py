@@ -2,60 +2,41 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from django.shortcuts import render
-# from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 import google.generativeai as genai
 import base64
 import tempfile
 import os
-# import json
-# import razorpay
 from django.conf import settings
 from app.models import *
 from mongoengine.errors import DoesNotExist, ValidationError
 from datetime import datetime, timedelta
 import cv2
-import time
-import hmac
-import hashlib
 import requests
 from bs4 import BeautifulSoup
 from faster_whisper import WhisperModel
 from PyPDF2 import PdfReader
-from docx import Document
 from pptx import Presentation
 from openpyxl import load_workbook
 from app.serializers import *
-# from rest_framework.permissions import IsAuthenticated
 import mammoth
 import tempfile
 import os
+from app2.models import *
 
 genai.configure(api_key=settings.GEMINI_API_KEY)
 whisper_model = WhisperModel("tiny", compute_type="float32",device="cpu")
-# whisper_model = whisper.load_model("base")
 
 def extract_url_text(url):
     try:
-        # Send a GET request to the URL
         response = requests.get(url)
-        response.raise_for_status()  # Raise an exception for bad status codes
-        
-        # Parse the HTML content
+        response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Remove script and style elements
-        for script in soup(["script", "style"]):
-            script.decompose()
-        
-        # Get text content
-        text = soup.get_text(separator='\n')
-        
-        # Clean up the text
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        text = '\n'.join(lines)
-        
-        if not text.strip():
+        for tag in soup(["script", "style"]):
+            tag.decompose()
+        text = '\n'.join(
+            line.strip() for line in soup.get_text(separator='\n').splitlines() if line.strip()
+        )
+        if not text:
             raise ValueError("No text content found in URL")
         return text
     except Exception as e:
@@ -67,228 +48,140 @@ def extract_frame(video_file):
         tmp_path = tmp.name
 
     cap = cv2.VideoCapture(tmp_path)
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    middle_frame = frame_count // 2
-    cap.set(cv2.CAP_PROP_POS_FRAMES, middle_frame)
-
+    mid_frame = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) // 2
+    cap.set(cv2.CAP_PROP_POS_FRAMES, mid_frame)
     success, frame = cap.read()
-    frame_path = tmp_path + "_frame.jpg"
-
-    if success:
-        cv2.imwrite(frame_path, frame)
-
     cap.release()
     os.remove(tmp_path)
 
+    if not success:
+        raise Exception("Could not read frame from video")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_img:
+        frame_path = tmp_img.name
+        cv2.imwrite(frame_path, frame)
+
     with open(frame_path, "rb") as f:
         image_data = f.read()
-
     os.remove(frame_path)
     return image_data, "image/jpeg"
+
 def transcribe_audio(audio_file):
     try:
-        # Get the file extension from the original file
-        file_extension = os.path.splitext(audio_file.name)[1].lower()
-        if not file_extension:
-            file_extension = '.mp3'  # Default to mp3 if no extension
-
-        # Create temp file with correct extension
-        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as tmp:
-            # Read in chunks to handle large files
+        suffix = os.path.splitext(audio_file.name)[1] or '.mp3'
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             for chunk in audio_file.chunks():
                 tmp.write(chunk)
             tmp_path = tmp.name
 
-        try:
-            # Transcribe with error handling
-            segments, info = whisper_model.transcribe(
-                tmp_path,
-                beam_size=5,
-                language=None,  # Auto-detect language
-                initial_prompt="This is a transcription of an audio file."
-            )
-            
-            if not segments:
-                raise ValueError("No speech detected in audio file")
-            
-            # Combine all segments with proper spacing
-            text = ""
-            for segment in segments:
-                text += segment.text + " "
-            
-            text = text.strip()
-            if not text:
-                raise ValueError("Transcription produced empty result")
-            
-            return text
+        segments, _ = whisper_model.transcribe(tmp_path, beam_size=5, language=None)
+        os.remove(tmp_path)
 
-        except Exception as e:
-            raise Exception(f"Transcription failed: {str(e)}")
+        if not segments:
+            raise ValueError("No speech detected")
 
-        finally:
-            # Clean up temp file
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-
+        return ' '.join(s.text.strip() for s in segments if s.text.strip())
     except Exception as e:
         raise Exception(f"Audio processing failed: {str(e)}")
 
 def extract_word_text(word_file):
     try:
-        # Create a temporary file to save the uploaded Word document
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
             for chunk in word_file.chunks():
                 tmp.write(chunk)
             tmp_path = tmp.name
 
-        # Use mammoth to extract text
         with open(tmp_path, "rb") as docx_file:
-            result = mammoth.extract_raw_text(docx_file)
-            text = result.value
-            # You can also access warnings like result.messages
-
-        # Clean up the temporary file
+            text = mammoth.extract_raw_text(docx_file).value
         os.remove(tmp_path)
 
         if not text.strip():
-            raise ValueError("No text content found in Word document")
+            raise ValueError("No text in Word document")
         return text
     except Exception as e:
-        raise Exception(f"Error extracting Word document text: {str(e)}")
+        raise Exception(f"Word text extraction error: {str(e)}")
 
 def extract_pdf_text(pdf_file):
     try:
         reader = PdfReader(pdf_file)
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text() + "\n"
+        text = '\n'.join(page.extract_text() for page in reader.pages if page.extract_text())
         if not text.strip():
-            raise ValueError("No text content found in PDF document")
+            raise ValueError("No text in PDF")
         return text
     except Exception as e:
-        raise Exception(f"Error extracting PDF text: {str(e)}")
+        raise Exception(f"PDF extraction error: {str(e)}")
 
 def extract_ppt_text(ppt_file):
     try:
         prs = Presentation(ppt_file)
-        text = ""
-        
-        # Extract text from all slides
-        for slide in prs.slides:
-            for shape in slide.shapes:
-                if hasattr(shape, "text"):
-                    text += shape.text + "\n"
-        
+        text = '\n'.join(
+            shape.text for slide in prs.slides for shape in slide.shapes if hasattr(shape, "text")
+        )
         if not text.strip():
-            raise ValueError("No text content found in PowerPoint document")
+            raise ValueError("No text in PowerPoint")
         return text
     except Exception as e:
-        raise Exception(f"Error extracting PowerPoint text: {str(e)}")
+        raise Exception(f"PowerPoint extraction error: {str(e)}")
 
 def extract_excel_text(excel_file):
     try:
-        workbook = load_workbook(excel_file)
-        text = ""
-        
-        # Extract text from all sheets
-        for sheet in workbook.worksheets:
-            for row in sheet.iter_rows():
-                for cell in row:
-                    if cell.value:
-                        text += str(cell.value) + "\n"
-        
+        wb = load_workbook(excel_file, read_only=True)
+        text = '\n'.join(
+            str(cell.value) for sheet in wb.worksheets for row in sheet.iter_rows()
+            for cell in row if cell.value
+        )
         if not text.strip():
-            raise ValueError("No text content found in Excel document")
+            raise ValueError("No text in Excel")
         return text
     except Exception as e:
-        raise Exception(f"Error extracting Excel document text: {str(e)}")
+        raise Exception(f"Excel extraction error: {str(e)}")
 
 def parse_questions(response_text, question_type='mcq'):
     questions = []
-    topic = 'general'  # Default topic
-    
+    topic = 'general'
     try:
-        # Extract topic first
         lines = response_text.strip().splitlines()
         for line in lines:
-            if line.strip().lower().startswith('topic:'):
+            if line.lower().startswith('topic:'):
                 topic = line.split(':', 1)[1].strip()
                 break
-        
+
         blocks = response_text.strip().split("Q")[1:]
-        
+
         for block in blocks:
-            try:
-                lines = [line.strip() for line in block.strip().splitlines() if line.strip()]
-                
-                if not lines:
-                    continue
-                
-                # Extract question text more flexibly
-                question_text = lines[0]
-                if ':' in question_text:
-                    question_text = question_text.split(':', 1)[1].strip()
-                
-                # Handle MCQ format
-                if question_type.lower() == 'mcq':
-                    options = []
-                    answer_line = None
-                    
-                    for line in lines[1:]:
-                        line = line.strip()
-                        if line.lower().startswith(('a.', 'b.', 'c.', 'd.')):
-                            options.append(line[2:].strip())
-                        elif any(line.lower().startswith(prefix) for prefix in ['answer:', 'ans:', 'a:']):
-                            answer_line = line
-                    
-                    if len(options) == 4 and answer_line:
-                        correct_letter = answer_line.split(':')[1].strip().upper()[0]
-                        correct_index = ord(correct_letter) - ord('A')
-                        
-                        if 0 <= correct_index < len(options):
-                            questions.append({
-                                'question': question_text,
-                                'options': options,
-                                'answer': options[correct_index],
-                                'topic': topic
-                            })
-                
-                # Handle True/False format
-                elif question_type.lower() == 'true_false':
-                    options = ['True', 'False']
-                    answer_line = None
-                    
-                    for line in lines:
-                        if any(line.lower().startswith(prefix) for prefix in ['answer:', 'ans:', 'a:']):
-                            answer_line = line
-                            break
-                    
-                    if answer_line:
-                        answer_text = answer_line.split(':')[1].strip().lower()
-                        
-                        if answer_text in ['true', 't', 'a']:
-                            correct_index = 0
-                        elif answer_text in ['false', 'f', 'b']:
-                            correct_index = 1
-                        else:
-                            continue
-                        
+            lines = [line.strip() for line in block.strip().splitlines() if line.strip()]
+            if not lines:
+                continue
+
+            question_text = lines[0].split(':', 1)[1].strip() if ':' in lines[0] else lines[0]
+            answer_line = next((line for line in lines if line.lower().startswith(('answer:', 'ans:', 'a:'))), None)
+
+            if question_type.lower() == 'mcq':
+                options = [line[2:].strip() for line in lines[1:] if line.lower().startswith(('a.', 'b.', 'c.', 'd.'))]
+                if len(options) == 4 and answer_line:
+                    correct_index = ord(answer_line.split(':')[1].strip().upper()[0]) - ord('A')
+                    if 0 <= correct_index < 4:
                         questions.append({
                             'question': question_text,
                             'options': options,
                             'answer': options[correct_index],
                             'topic': topic
                         })
-            except Exception as block_error:
-                print(f"Error parsing block: {str(block_error)}")
-                continue
-                
+
+            elif question_type.lower() == 'true_false' and answer_line:
+                answer_text = answer_line.split(':')[1].strip().lower()
+                correct_index = 0 if answer_text in ['true', 't', 'a'] else 1 if answer_text in ['false', 'f', 'b'] else -1
+                if correct_index in [0, 1]:
+                    questions.append({
+                        'question': question_text,
+                        'options': ['True', 'False'],
+                        'answer': ['True', 'False'][correct_index],
+                        'topic': topic
+                    })
     except Exception as e:
         print(f"Error parsing questions: {str(e)}")
-    
+
     return questions
-
-
 
 class MultimodalQuizView(APIView):
     def get(self, request, pk):
@@ -301,148 +194,109 @@ class MultimodalQuizView(APIView):
                 'difficulty_levels': ['easy', 'medium', 'hard'],
                 'question_types': ['mcq', 'true_false']
             })
-        except User.DoesNotExist:
+        except user.DoesNotExist:
             return Response({
                 'error': 'User not found'
             }, status=status.HTTP_404_NOT_FOUND)
 
     def post(self, request, pk):
         try:
-            # Get user by pk
             user = User.objects.get(id=pk)
-            
-            # Check for valid payment first
-            # user = request.user
-            # valid_payment = Payment.objects.filter(
-            #     user=user,
-            #     status='success',
-            #     attempts_remaining__gt=0
-            # ).first()
-            
-            # if not valid_payment:
-            #     return Response({
-            #         'error': 'No valid payment found. Please purchase quiz attempts.'
-            #     }, status=status.HTTP_402_PAYMENT_REQUIRED)
-
-            # # Handle multipart form data or JSON
-            
             content_type = request.headers.get('Content-Type', '')
             is_multipart = 'multipart/form-data' in content_type.lower()
+            
+            # Parse input
+            data = request.POST if is_multipart else request.data
+            files = request.FILES if is_multipart else {}
 
-            if is_multipart:
-                content_text = request.POST.get('text', '')
-                image = request.FILES.get('image')
-                audio = request.FILES.get('audio')
-                video = request.FILES.get('video')
-                pdf = request.FILES.get('pdf')
-                word = request.FILES.get('word')
-                ppt = request.FILES.get('ppt')
-                excel = request.FILES.get('excel')
-                url = request.POST.get('url')
-                difficulty = request.POST.get('difficulty', 'medium')
-                question_type = request.POST.get('question_type', 'mcq')
-                number_question=int(request.POST.get('number_question',10))
-            else:
-                content_text = request.data.get('text', '')
-                image = None
-                audio = None
-                video = None
-                pdf = None
-                word = None
-                ppt = None
-                excel = None
-                url = request.data.get('url')
-                difficulty = request.data.get('difficulty', 'medium')
-                question_type = request.data.get('question_type', 'mcq')
-                number_question=int(request.data.get('number_question',10))
+            content_text = data.get('text', '').strip()
+            url = data.get('url')
+            difficulty = data.get('difficulty', 'medium')
+            question_type = data.get('question_type', 'mcq')
+            number_question = int(data.get('number_question', 10))
 
-            if not any([content_text.strip(), image, audio, video, pdf, word, ppt, excel, url]):
-                return Response({
-                    'error': 'Please provide at least one type of content (text/image/audio/video/pdf/word/ppt/excel/url)'
-                }, status=status.HTTP_400_BAD_REQUEST)
-
+            # Validate inputs
+            if not any([content_text, *files.values(), url]):
+                return Response({'error': 'Provide at least one content input'}, status=status.HTTP_400_BAD_REQUEST)
             if difficulty not in ['easy', 'medium', 'hard']:
-                return Response({
-                    'error': 'Invalid difficulty level. Choose from: easy, medium, hard'
-                }, status=status.HTTP_400_BAD_REQUEST)
-
+                return Response({'error': 'Invalid difficulty'}, status=status.HTTP_400_BAD_REQUEST)
             if question_type not in ['mcq', 'true_false']:
-                return Response({
-                    'error': 'Invalid question type. Choose from: mcq, true_false'
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'error': 'Invalid question type'}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Generate quiz prompt based on difficulty and question type
-            difficulty_instructions = {
+            # Generate prompt
+            difficulty_instruction = {
                 'easy': 'Generate basic, straightforward questions suitable for beginners.',
                 'medium': 'Generate moderately challenging questions that require good understanding.',
                 'hard': 'Generate complex questions that require deep understanding and critical thinking.'
-            }
+            }[difficulty]
 
-            if question_type == 'mcq':
-                prompt = f"""
-                You're an AI quiz generator.
-                {difficulty_instructions[difficulty]}
-                Based on the following content, first identify the main topic of the content.
-                Then generate {number_question} questions with 4 options related to that topic.
-                Format strictly like:
-                Topic: <main_topic>
-                
-                Q: <question>
-                A. <option>
-                B. <option>
-                C. <option>
-                D. <option>
-                Answer: <correct_option_letter>
+            base_prompt = f"""
+            You're an AI quiz generator.
+            {difficulty_instruction}
+            Based on the following content, first identify the main topic of the content.
+            Then generate {number_question} {'questions with 4 options' if question_type == 'mcq' else 'true/false questions'} related to that topic.
+            Format strictly like:
+            Topic: <main_topic>
+            
+            Q: <question>
+            A. <option>
+            B. <option>
+            C. <option>
+            D. <option>
+            Answer: <correct_option_letter>
 
-                Text: {content_text}
-                """
-            else:  # true_false
-                prompt = f"""
-                You're an AI quiz generator.
-                {difficulty_instructions[difficulty]}
-                Based on the following content, first identify the main topic of the content.
-                Then generate {number_question} true/false questions related to that topic.
-                Format strictly like:
-                Topic: <main_topic>
-                
-                Q: <question>
-                A. True
-                B. False
-                Answer: <correct_option_letter>
+            Text: {content_text}
+            """ if question_type == 'mcq' else f"""
+            You're an AI quiz generator.
+            {difficulty_instruction}
+            Based on the following content, first identify the main topic of the content.
+            Then generate {number_question} true/false questions related to that topic.
+            Format strictly like:
+            Topic: <main_topic>
+            
+            Q: <question>
+            A. True
+            B. False
+            Answer: <correct_option_letter>
 
-                Text: {content_text}
-                """
+            Text: {content_text}
+            """
 
-            parts = [{"text": prompt}]
+            parts = [{"text": base_prompt}]
 
-            # Process multimedia content
-            if image:
-                img_data = image.read()
+            # Media extraction functions
+            def update_text_and_parts(new_text, label):
+                nonlocal content_text
+                content_text = new_text
+                parts[0]['text'] = parts[0]['text'].replace("Text: ", f"Text: {content_text}")
+                parts.append({"text": f"Additional context from {label}: {new_text}"})
+
+            for field, extractor, label in [
+                ('audio', transcribe_audio, 'audio'),
+                ('pdf', extract_pdf_text, 'PDF'),
+                ('word', extract_word_text, 'Word document'),
+                ('ppt', extract_ppt_text, 'PowerPoint'),
+                ('excel', extract_excel_text, 'Excel'),
+                ('url', extract_url_text, 'URL')
+            ]:
+                if data.get(field) or files.get(field):
+                    try:
+                        extracted = extractor(data.get(field) or files.get(field))
+                        if not extracted:
+                            return Response({'error': f'Could not extract from {label}'}, status=status.HTTP_400_BAD_REQUEST)
+                        update_text_and_parts(extracted, label)
+                    except Exception as e:
+                        return Response({'error': f'Error processing {label}: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+            if image := files.get('image'):
                 parts.append({
                     "inline_data": {
                         "mime_type": image.content_type,
-                        "data": base64.b64encode(img_data).decode()
+                        "data": base64.b64encode(image.read()).decode()
                     }
                 })
 
-            if audio:
-                try:
-                    transcribed = transcribe_audio(audio)
-                    if not transcribed:
-                        return Response({
-                            'error': 'Could not transcribe audio file'
-                        }, status=status.HTTP_400_BAD_REQUEST)
-                    
-                    content_text = transcribed
-                    parts[0]["text"] = parts[0]["text"].replace("Text: ", f"Text: {content_text}")
-                    parts.append({"text": f"Additional context from audio: {transcribed}"})
-                    
-                except Exception as e:
-                    return Response({
-                        'error': f'Error processing audio: {str(e)}'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-
-            if video:
+            if video := files.get('video'):
                 frame_data, mime = extract_frame(video)
                 parts.append({
                     "inline_data": {
@@ -450,254 +304,49 @@ class MultimodalQuizView(APIView):
                         "data": base64.b64encode(frame_data).decode()
                     }
                 })
-                
-            if pdf:
-                pdf_text = extract_pdf_text(pdf)
-                if pdf_text:
-                    content_text = pdf_text
-                    parts[0]["text"] = parts[0]["text"].replace("Text: ", f"Text: {content_text}")
 
-            if word:
-                try:
-                    word_text = extract_word_text(word)
-                    if word_text:
-                        content_text = word_text
-                        parts[0]["text"] = parts[0]["text"].replace("Text: ", f"Text: {content_text}")
-                    else:
-                        return Response({
-                            'error': 'Could not extract text from Word document'
-                        }, status=status.HTTP_400_BAD_REQUEST)
-                except Exception as e:
-                    return Response({
-                        'error': f'Error processing Word document: {str(e)}'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-
-            if ppt:
-                try:
-                    ppt_text = extract_ppt_text(ppt)
-                    if ppt_text:
-                        content_text = ppt_text
-                        parts[0]["text"] = parts[0]["text"].replace("Text: ", f"Text: {content_text}")
-                    else:
-                        return Response({
-                            'error': 'Could not extract text from PowerPoint document'
-                        }, status=status.HTTP_400_BAD_REQUEST)
-                except Exception as e:
-                    return Response({
-                        'error': f'Error processing PowerPoint document: {str(e)}'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-
-            if excel:
-                try:
-                    excel_text = extract_excel_text(excel)
-                    if excel_text:
-                        content_text = excel_text
-                        parts[0]["text"] = parts[0]["text"].replace("Text: ", f"Text: {content_text}")
-                    else:
-                        return Response({
-                            'error': 'Could not extract text from Excel document'
-                        }, status=status.HTTP_400_BAD_REQUEST)
-                except Exception as e:
-                    return Response({
-                        'error': f'Error processing Excel document: {str(e)}'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-            
-            if url:
-                try:
-                    url_text = extract_url_text(url)
-                    if url_text:
-                        content_text = url_text
-                        parts[0]["text"] = parts[0]["text"].replace("Text:", f"Text:{content_text}")
-                    else:
-                        return Response({
-                            'error': 'Could not extract text from URL'
-                        })
-                except Exception as e:
-                    return Response({
-                        'error': f'Error processing URL: {str(e)}'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-
-            # Generate questions
+            # AI Generation
             model = genai.GenerativeModel("models/gemini-1.5-flash")
             response = model.generate_content(parts)
             output = response.text
             questions = parse_questions(output, question_type)
-            
+
             if not questions:
-                return Response({
-                    'error': 'Failed to generate questions'
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
-            # Get the main topic (using the first question's topic)
+                return Response({'message': 'Failed to generate questions'}, status=status.HTTP_400_BAD_REQUEST)
+
             main_topic = questions[0].get('topic', 'general')
-            
-            # Prepare data for QuizSerializer
+
             quiz_data = {
                 'user': str(user.id),
-                'title': f"Quiz on {main_topic}", # You might want a more descriptive title
+                'title': f"Quiz on {main_topic}",
                 'questions': questions,
-                'number_questions': len(questions),
+                'number_question': len(questions),
                 'difficulty': difficulty,
                 'question_type': question_type,
-                'content_type': [ct for ct in ['text', 'image', 'audio', 'video', 'pdf', 'word', 'ppt', 'excel', 'url'] if request.data.get(ct) or request.FILES.get(ct)], # Dynamically get content types
-                'topics': [main_topic], # Or extract more topics if available
-                'content_summary': content_text[:500] if content_text else ""
+                'content_type': [ct for ct in ['text', 'image', 'audio', 'video', 'pdf', 'word', 'ppt', 'excel', 'url'] if data.get(ct) or files.get(ct)],
+                'topics': [main_topic],
             }
 
-            # Use QuizSerializer to create and save the Quiz
             quiz_serializer = QuizSerializer(data=quiz_data)
             if quiz_serializer.is_valid():
                 quiz = quiz_serializer.save()
             else:
-                return Response(quiz_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'message': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
 
             return Response({
-                    'message': 'Quiz generated and saved successfully',
-                    'user_id':str(user.id),
-                    'quiz_id': str(quiz.id), # Return the generated quiz ID
-                    'topics': main_topic,
-                    'questions': [{
+                'message': 'Quiz generated successfully',
+                'user_id': str(user.id),
+                'quiz_id': str(quiz.id),
+                'topics': main_topic,
+                'questions': [
+                    {
                         'question': q['question'],
                         'options': q['options'],
                         'answer': q['answer']
-                    } for q in questions]
-                })
-            
-        except User.DoesNotExist:
-            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    } for q in questions
+                ]
+            })
 
-class UserSignupView(APIView):
-    def post(self, request):
-        try:
-            data = request.data
-            serializer = UserSerializer(data=data)
-            
-            if serializer.is_valid():
-                # Create user instance but don't save yet
-                user = User(
-                    profile=data['profile'],
-                    full_name=data['full_name'],
-                    phone_number=data['phone_number'],
-                    country_code=data['country_code'],
-                    email=data['email']
-                )
-                
-                # Set password
-                user.set_password(data['password'], data['confirm_password'])
-                user.save()
-                
-                return Response({
-                    'message': 'User created successfully',
-                    'user_id': str(user.id)
-                }, status=status.HTTP_201_CREATED)
-            
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            
-        except ValidationError as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-class UserLoginView(APIView):
-    def post(self, request):
-        try:
-            email = request.data.get('email')
-            password = request.data.get('password')
-            
-            try:
-                user = User.objects.get(email=email)
-            except DoesNotExist:
-                return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
-            
-            if user.check_password(password):
-                user.last_login = datetime.utcnow()
-                user.save()
-                
-                return Response({
-                    'message': 'Login successful',
-                    'user_id': str(user.id)
-                })
-            
-            return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
-            
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-class UserDetailView(APIView):
-    def get(self, request, pk):
-        try:
-            user = User.objects.get(id=pk)
-            user_data = {
-                "full_name": user.full_name,
-                "phone_number": user.phone_number,
-                "country_code": user.country_code,
-                "email": user.email,
-                "is_active": user.is_active
-            }
-            return Response({"user": user_data})
-        
-        except (DoesNotExist, ValidationError):
-            return Response({"error": "User not found or invalid ID"}, status=status.HTTP_404_NOT_FOUND)
-
-class UserDashboardView(APIView):
-    def get(self, request, pk):
-        try:
-            user = User.objects.get(id=pk)
-            
-            # Get quiz attempts
-            attempts = QuizAttempt.objects(user=user).order_by('-created_at')
-            
-            # Get user streak
-            streak = UserStreak.objects(user=user).first()
-            
-            # Get user points
-            points = UserPoints.objects(user=user).first()
-            
-            # Get saved quizzes
-            saved_quiz=Quiz.objects.all()
-            
-            # Get feedback history
-            feedback_history = Feedback.objects(user=user).order_by('-created_at')
-            
-            # Attach related data to user object
-            user.quiz_attempts = attempts
-            user.streak = streak
-            user.points = points
-            user.saved_quiz = saved_quiz
-            user.feedback_history = feedback_history
-            
-            # Serialize user data with all related information
-            user_data = UserDashboardSerializer(user).data
-            return Response(user_data)
-            
-        except User.DoesNotExist:
-            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-class FeedbackView(APIView):
-    def post(self, request, pk):
-        try:
-            user = User.objects.get(id=pk)
-            
-            feedback_data = {
-                'user': user.full_name,
-                'type': request.data.get('type'),
-                'title': request.data.get('title'),
-                'description': request.data.get('description'),
-                'status':request.data.get('status')
-                
-            }
-            
-            feedback = Feedback(**feedback_data)
-            feedback.save()
-            
-            return Response({
-                'message': 'Feedback submitted successfully',
-                'feedback_id': str(feedback.id)
-            }, status=status.HTTP_201_CREATED)
         except User.DoesNotExist:
             return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
@@ -708,74 +357,81 @@ class SubmitQuizView(APIView):
         try:
             user = User.objects.get(id=pk)
             quiz_id = request.data.get('quiz_id')
-            user_answers = request.data.get('user_answers')  # Dictionary of {question_id: selected_option_index}
+            user_answers = request.data.get('user_answers')  # Dict of {question_id: selected_option_index}
 
-            if not user or quiz_id or not user_answers:
-                return Response({'error': 'User ID and Quiz ID and user answers are required'}, status=status.HTTP_400_BAD_REQUEST)
-
+            if not user or not quiz_id or not user_answers:
+                return Response({'error': 'User ID, Quiz ID and user answers are required'}, status=status.HTTP_400_BAD_REQUEST)
             try:
                 quiz = Quiz.objects.get(id=quiz_id)
             except DoesNotExist:
                 return Response({'error': 'Quiz not found'}, status=status.HTTP_404_NOT_FOUND)
 
             score = 0
-            total_questions = len(quiz.questions)
             correct_answers_count = 0
+            total_questions = len(quiz.questions)
+
+            evaluated_questions = []
+            user_answer_texts = []
 
             for q_data in quiz.questions:
-                # Corrected line: Access '_id' as a dictionary key
-                question_id = str(q_data.get('_id')) 
+                question_id = str(q_data.get('_id'))
                 correct_answer = q_data.get('answer')
-                
+                question_text = q_data.get('question')
+                options = q_data.get('options', [])
+
                 if question_id in user_answers:
                     selected_option_index = user_answers[question_id]
-                    # Assuming options are stored as a list in the Quiz model
-                    if 0 <= selected_option_index < len(q_data.get('options', [])):
-                        selected_answer = q_data['options'][selected_option_index]
-                        if selected_answer == correct_answer:
+                    if 0 <= selected_option_index < len(options):
+                        selected_answer = options[selected_option_index]
+                        is_correct = selected_answer == correct_answer
+                        if is_correct:
                             score += 1
                             correct_answers_count += 1
+                        evaluated_questions.append({
+                            'question_id': question_id,
+                            'question': question_text,
+                            'options': options,
+                            'correct_answer': correct_answer,
+                            'selected_answer': selected_answer,
+                            'is_correct': is_correct
+                        })
+                        user_answer_texts.append(selected_answer)
+                    else:
+                        evaluated_questions.append({
+                            'question_id': question_id,
+                            'question': question_text,
+                            'options': options,
+                            'correct_answer': correct_answer,
+                            'selected_answer': None,
+                            'is_correct': False
+                        })
+                        user_answer_texts.append("")
 
-            # Prepare data for QuizAttemptSerializer
+            # Use QuizAttemptSerializer instead of direct create
             quiz_attempt_data = {
-                'user': str(user.id),  # Pass user ID as string for serializer
-                'quiz': str(quiz.id),  # Pass quiz ID as string for serializer
+                'user': str(user.id),
+                'quiz': str(quiz.id),
+                'questions': evaluated_questions,
+                'number_question': total_questions,
+                'user_answers': user_answer_texts,
                 'score': score,
-                'total_questions': total_questions,
-                'correct_answers_count': correct_answers_count,
-                'attempted_at': datetime.utcnow().isoformat() + 'Z' # ISO 8601 format with 'Z' for UTC
+                'difficulty': quiz.difficulty,
+                'question_type': quiz.question_type,
+                'topics': quiz.topics
             }
 
-            # Use QuizAttemptSerializer to create and save the QuizAttempt
             serializer = QuizAttemptSerializer(data=quiz_attempt_data)
             if serializer.is_valid():
-                quiz_attempt = serializer.save()
+                attempt = serializer.save()
             else:
-                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-            # Update UserStreak and UserPoints
-            user_streak, created = UserStreak.objects.get_or_create(user=user)
-            user_points, created = UserPoints.objects.get_or_create(user=user)
-
-            if correct_answers_count == total_questions: # Perfect score
-                user_streak.current_streak += 1
-                user_streak.last_quiz_date = datetime.utcnow() # Use datetime.utcnow() for consistency
-                user_points.points += 100 # Example: 100 points for a perfect quiz
-            else:
-                user_streak.current_streak = 0 # Reset streak if not perfect
-                user_points.points += score * 10 # Example: 10 points per correct answer
-            
-            user_streak.save()
-            user_points.save()
+                return Response({'message':'invalid credantials'}, status=status.HTTP_400_BAD_REQUEST)
 
             return Response({
                 'message': 'Quiz submitted successfully',
                 'score': score,
                 'total_questions': total_questions,
                 'correct_answers': correct_answers_count,
-                'quiz_attempt_id': str(quiz_attempt.id),
-                'current_streak': user_streak.current_streak,
-                'total_points': user_points.points
+                'quiz_attempt_id': str(attempt.id)
             }, status=status.HTTP_200_OK)
 
         except User.DoesNotExist:

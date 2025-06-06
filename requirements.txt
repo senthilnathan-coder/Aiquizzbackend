@@ -1,8 +1,5 @@
 Django>=4.2.21
 google-generativeai
-python-magic
-openai-whisper
-moviepy
 python-dotenv
 
 mongoengine>=0.27

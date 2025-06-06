@@ -12,8 +12,6 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 from pathlib import Path
 
-import pymongo.mongo_client
-
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -48,7 +46,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     "corsheaders",
     'app',
-    'app2',
+    'app3',
     'rest_framework',
     
 ]
@@ -93,42 +91,9 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'AIgemini.wsgi.application'
 
-# from mongoengine import connect
-# from pymongo.errors import ServerSelectionTimeoutError
-# import pymongo
 
-# MONGODB_SETTINGS = {
-#     'db': 'demo',
-#     'host': 'localhost',
-#     'port': 27017,
-#     # 'username': 'your_user',
-#     # 'password': 'your_password',
-#     # 'authentication_source': 'admin',
-# }
-
-# try:
-
-#     connect(
-#         db=MONGODB_SETTINGS['db'],
-#         host=MONGODB_SETTINGS['host'],
-#         port=MONGODB_SETTINGS['port'],
-#         # username=MONGODB_SETTINGS.get('username'),
-#         # password=MONGODB_SETTINGS.get('password'),
-#         # authentication_source=MONGODB_SETTINGS.get('authentication_source'),
-#         serverSelectionTimeoutMS=3000  # Timeout in milliseconds
-#     )
     
 
-#     client = pymongo.MongoClient(
-#         host=MONGODB_SETTINGS['host'],
-#         port=MONGODB_SETTINGS['port'],
-#         serverSelectionTimeoutMS=3000
-#     )
-#     client.admin.command('ping')
-#     print("✅ MongoDB connected successfully!")
-
-# except ServerSelectionTimeoutError:
-#     print("❌ MongoDB connection failed.")
 
 from mongoengine import connect
 from pymongo.errors import ServerSelectionTimeoutError
@@ -136,14 +101,6 @@ import pymongo
 
 
 
-# MONGODB_SETTINGS = {
-#     'db': 'demo',
-#     'host': 'localhost',
-#     'port': 27017,
-#     # 'username': 'your_user',
-#     # 'password': 'your_password',
-#     # 'authentication_source': 'admin',
-# }
 
 MONGODB_SETTINGS = {
     'db': 'DIGIAIQUEST',
@@ -152,28 +109,12 @@ MONGODB_SETTINGS = {
 
 try:
 
-    # connect(
-    #     db=MONGODB_SETTINGS['db'],
-    #     host=MONGODB_SETTINGS['host'],
-    #     port=MONGODB_SETTINGS['port'],
-    #     # username=MONGODB_SETTINGS.get('username'),
-    #     # password=MONGODB_SETTINGS.get('password'),
-    #     # authentication_source=MONGODB_SETTINGS.get('authentication_source'),
-    #     serverSelectionTimeoutMS=3000  # Timeout in milliseconds
-    # )
 
     connect(
         db=MONGODB_SETTINGS['db'],
         host=MONGODB_SETTINGS['host'],
         serverSelectionTimeoutMS=5000
     )
-    
-
-    # client = pymongo.MongoClient(
-    #     host=MONGODB_SETTINGS['host'],
-    #     port=MONGODB_SETTINGS['port'],
-    #     serverSelectionTimeoutMS=3000
-    # )
 
     client = pymongo.MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
     client.admin.command('ping')
@@ -183,26 +124,15 @@ except ServerSelectionTimeoutError:
     print("❌ MongoDB connection failed.")
 
 
-DATABASES = {
-    # 'default': {
-    #     'ENGINE': 'djongo',
-    #     'NAME': MONGODB_SETTINGS['db'],
-    #     'CLIENT': {
-    #         'host': MONGODB_SETTINGS['host'],
-    #         'port': MONGODB_SETTINGS['port'],
-    #         # 'username': MONGODB_SETTINGS.get('username'),
-    #         # 'password': MONGODB_SETTINGS.get('password'),
-    #         # 'authSource': MONGODB_SETTINGS.get('authentication_source'),
-    #     }
-    # }
-    'default': {
-        'ENGINE': 'djongo',
-        'NAME': 'DIGAIQUEST',
-        'CLIENT': {
-            'host': MONGODB_URI,
-        }
-    }
-}
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'djongo',
+#         'NAME': 'DIGAIQUEST',
+#         'CLIENT': {
+#             'host': MONGODB_URI,
+#         }
+#     }
+# }
 
 
 # Password validation
@@ -248,15 +178,18 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Add REST Framework settings
 
+REST_FRAMEWORK = {
+    'DEFAULT_RENDERER_CLASSES': (
+        'rest_framework.renderers.JSONRenderer',
+    )
+}
 
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'  # or your SMTP server
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
-
-# from django.db import connections
-# from django.db.utils import OperationalError
-
-# try:
-#     connections['default'].cursor()
-#     print("✅ MongoDB connected successfully!")
-# except OperationalError as e:
-#     print(f"❌ MongoDB connection failed: {e}")
 

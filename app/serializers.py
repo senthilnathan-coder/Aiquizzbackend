@@ -1,66 +1,32 @@
 from rest_framework_mongoengine.serializers import DocumentSerializer
-from .models import User, Quiz, QuizAttempt, UserStreak, UserPoints, Feedback
+from .models import  Quiz, QuizAttempt
 from mongoengine import *
+from app2.models import *
+from bson import ObjectId
 
-class UserSerializer(DocumentSerializer):
-    class Meta:
-        model = User
-        fields = ['id', 'profile', 'full_name', 'phone_number', 'country_code', 'email', 'is_active']
-        read_only_fields = ['is_active', 'created_at', 'last_login']
 
 class QuizSerializer(DocumentSerializer):
-    user = StringField(required=True)  # Add this line to handle user ID as string
-    
+    user = StringField(required=True)
+
     class Meta:
         model = Quiz
-        fields = ['id', 'user', 'title', 'questions', 'number_questions','difficulty', 'question_type', 
-                 'created_at', 'content_type', 'topics']
-        read_only_fields = ['created_at']
+        fields = ['id', 'user', 'title', 'questions', 'number_question', 'difficulty', 'question_type', 
+                  'created_at', 'content_type', 'topics']
+        
+
 
 class QuizAttemptSerializer(DocumentSerializer):
-    user = StringField(required=True)  # Add this line
-    quiz = StringField(required=True)  # Add this line
-    
     class Meta:
         model = QuizAttempt
-        fields = ['id', 'user', 'quiz', 'questions','number_questions', 'user_answers', 'score', 'total',
-                 'difficulty', 'question_type', 'created_at', 'completed_at', 'topics',
-                 'accuracy', 'points_earned', 'weak_topics', 'rank',
-                 'percentile', 'time_taken', 'content_types']
-        read_only_fields = ['created_at', 'completed_at', 'accuracy', 'points_earned',
-                          'rank', 'percentile']
+        fields = [
+            'id', 'user', 'quiz', 'questions', 'number_question',
+            'user_answers', 'score', 'difficulty', 'question_type', 'topics'
+        ]
 
-class UserStreakSerializer(DocumentSerializer):
-    class Meta:
-        model = UserStreak
-        fields = ['id', 'user', 'current_streak', 'longest_streak', 'last_quiz_date',
-                 'streak_history']
-        read_only_fields = ['current_streak', 'longest_streak', 'last_quiz_date',
-                          'streak_history']
-
-class UserPointsSerializer(DocumentSerializer):
-    class Meta:
-        model = UserPoints
-        fields = ['id', 'user', 'total_points', 'level', 'points_history']
-        read_only_fields = ['total_points', 'level', 'points_history']
-
-
-
-class FeedbackSerializer(DocumentSerializer):
-    class Meta:
-        model = Feedback
-        fields = ['id', 'user', 'type', 'title', 'description', 'status']
-        read_only_fields = ['created_at', 'resolved_at']
-
-class UserDashboardSerializer(DocumentSerializer):
-    quiz_attempts = QuizAttemptSerializer(many=True, read_only=True)
-    streak = UserStreakSerializer(read_only=True)
-    points = UserPointsSerializer(read_only=True)
-    saved_quiz=QuizSerializer(many=True,read_only=True)
-    feedback_history = FeedbackSerializer(many=True, read_only=True)
-
-    class Meta:
-        model = User
-        fields = ['id', 'full_name', 'quiz_attempts', 'streak', 'points',
-                 'saved_quiz', 'feedback_history']
-        read_only_fields = fields
+    def create(self, validated_data):
+        # Convert string IDs to actual references
+        if isinstance(validated_data.get('user'), str):
+            validated_data['user'] = User.objects.get(id=ObjectId(validated_data['user']))
+        if isinstance(validated_data.get('quiz'), str):
+            validated_data['quiz'] = Quiz.objects.get(id=ObjectId(validated_data['quiz']))
+        return super().create(validated_data)

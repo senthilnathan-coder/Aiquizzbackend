@@ -1,13 +1,12 @@
-from django.urls import path 
-
 from app2.views import *
+from django.urls import path
 
 urlpatterns=[
-    path('admin/signup/',AdminsignupView.as_view(),name='AdminsignupView'),
-    path('admin/signin/',AdminsigninView.as_view(),name='AdminsignView'),
-    path('admin/usermanagement/',UserManagementView.as_view(),name='UserManagementView'),
-    path('admin/usermanagement/<str:pk>/',UserManagementView.as_view(),name='UserManagementView'),
-    path('admin/userfeedback/<str:pk>/',FeedbackManagementView.as_view(),name='FeedbackManagementView'),
-    path('admin/analytics/<str:pk>/',PerformanceAnalyticsView.as_view(),name='PerformanceAnalyticsView')
-    
+    path('user/signup/', UserSignupView.as_view(), name='signup'),
+    path('user/signin/', UserLoginView.as_view(), name='signin'),
+    path('user/logout/',UserLogoutView.as_view(),name='logout'),
+    path('userdashboard/', UserDashboardView.as_view(), name='dashboard'),
+    path('user/feedback/<str:pk>/',FeedbackView.as_view(),name='feedback'),
+    path('forgotpassword/',ForgotPasswordView.as_view(),name='forgotpassword'),
+    path('resetpassword/',ResetPasswordView.as_view(),name='resetpassword')
 ]
