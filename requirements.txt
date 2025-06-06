@@ -23,7 +23,7 @@ grpcio-status
 proto-plus
 protobuf
 httplib2
-
+phonenumbers
 # File processing
 beautifulsoup4
 lxml
