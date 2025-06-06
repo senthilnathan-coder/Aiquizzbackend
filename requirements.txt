@@ -4,7 +4,6 @@ djangorestframework
 django-cors-headers
 
 # MongoDB integration
-djongo==1.3.7
 mongoengine>=0.27
 django-rest-framework-mongoengine @ git+https://github.com/umutbozkurt/django-rest-framework-mongoengine.git
 
