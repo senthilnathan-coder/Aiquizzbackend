@@ -3,32 +3,54 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Django stuff:
+# Logs
 *.log
-local_settings.py
+
+# Django stuff
 db.sqlite3
 media/
+staticfiles/
+static/
 
-# Environment variables
+# Local settings
 .env
+.env.*
 
 # Virtual environment
 venv/
+.venv/
 env/
 
-# VSCode settings
+# Pytest
+.pytest_cache/
+.coverage
+
+# Editor directories and files
 .vscode/
-
-# PyCharm
 .idea/
-
-# MacOS
-.DS_Store
 
 # Python packaging
 *.egg-info/
-dist/
 build/
+dist/
 
-# Pytest cache
-.pytest_cache/
+# macOS
+.DS_Store
+
+# Node.js (in case of React or frontend inside project)
+node_modules/
+package-lock.json
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Hugging Face / AI models (large)
+*.pt
+*.pth
+*.bin
+*.h5
+~/.cache/huggingface/
+
+# Render build or model cache
+*.cache/
+.cache/
