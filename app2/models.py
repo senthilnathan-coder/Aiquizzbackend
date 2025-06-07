@@ -41,16 +41,12 @@ class User(Document):
 
     @staticmethod
     def validate_phone_number(phone_number):
-        try:
-            phone_number = ''.join(filter(str.isdigit, phone_number))
-            # country_code = ''.join(filter(lambda x: x.isdigit() or x == '+', country_code))
-            # if not country_code.startswith('+'):
-            #     country_code = '+' + country_code
-            full_number = phone_number
-            parsed_number = phonenumbers.parse(full_number)
-            return phonenumbers.is_valid_number(parsed_number)
-        except phonenumbers.phonenumberutil.NumberParseException:
-            return False
+        phone_number = ''.join(filter(str.isdigit, phone_number))
+    # Check if it's a 10-digit Indian mobile number starting with 6-9
+        if len(phone_number) == 10 and phone_number[0] in '6789':
+            return True
+        return False
+
 
     @staticmethod
     def validate_email_address(email):
