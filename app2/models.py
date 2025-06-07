@@ -40,7 +40,7 @@ class User(Document):
         return check_password_hash(self.password_hash, password)
 
     @staticmethod
-    def validate_phone_number(phone_number, country_code):
+    def validate_phone_number(phone_number):
         try:
             phone_number = ''.join(filter(str.isdigit, phone_number))
             # country_code = ''.join(filter(lambda x: x.isdigit() or x == '+', country_code))
