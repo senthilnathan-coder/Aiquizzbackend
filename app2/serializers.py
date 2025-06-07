@@ -6,7 +6,7 @@ from app.models import *
 class UserSerializer(DocumentSerializer):
     class Meta:
         model = User
-        fields = ['id', 'full_name', 'phone_number', 'country_code', 'email', 'is_active']
+        fields = ['id', 'full_name', 'phone_number', 'email', 'is_active']
         read_only_fields = ['is_active', 'created_at', 'last_login']
         
 class FeedbackSerializer(DocumentSerializer):

@@ -43,7 +43,14 @@ class AdminsignupView(APIView):
                     'admin_id': str(admin.id),
                 }, status=status.HTTP_201_CREATED)
 
-            return Response({'error': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
+                 
+            formatted_errors = {field: errors[0] if isinstance(errors, list) else errors
+                                for field, errors in serializer.errors.items()}
+            
+            return Response(
+                {'errors': formatted_errors},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -169,60 +176,77 @@ class AdminResetPasswordView(APIView):
 class AdminDashboardView(APIView):
     def post(self, request):
         token_key = request.data.get('admintoken')
-        if not token_key:
-            return Response({'error': 'AdminToken is required'}, status=status.HTTP_400_BAD_REQUEST)
+        admin_id = request.data.get('admin_id')  # New
+
+        if not token_key or not admin_id:
+            return Response({'error': 'AdminToken and Admin ID are required'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            # Use correct field name admintoken in the query
+            # Get the token by admintoken
             token = AdminToken.objects.get(admintoken=token_key)
-            
+
+            # Validate token expiration
             if token.expires_at < datetime.utcnow():
                 return Response({'error': 'Token has expired'}, status=status.HTTP_401_UNAUTHORIZED)
-            
+
             admin = token.admin
+
+            # Check if token's admin matches given admin_id
+            if str(admin.id) != admin_id:
+                return Response({'error': 'Admin ID does not match token'}, status=status.HTTP_403_FORBIDDEN)
+
             if not admin.is_active:
                 return Response({'error': 'Unauthorized access'}, status=status.HTTP_403_FORBIDDEN)
 
-            # Fetch feedback from users
+            # Feedback
             feedbacks = Feedback.objects().order_by('-created_at')
-            feedback_data = [{
-                'user_id': str(f.user.id),
-                'user_name': f.user.full_name,
-                'type': f.type,
-                'title': f.title,
-                'description': f.description,
-                'status': f.status,
-                'created_at': f.created_at.strftime('%Y-%m-%d %H:%M')
-            } for f in feedbacks]
+            feedback_data = []
+            for f in feedbacks:
+                try:
+                    user = f.user
+                    feedback_data.append({
+                        'user_id': str(user.id),
+                        'user_name': user.full_name,
+                        'type': f.type,
+                        'title': f.title,
+                        'description': f.description,
+                        'status': f.status,
+                        'created_at': f.created_at.strftime('%Y-%m-%d %H:%M')
+                    })
+                except Exception:
+                    continue
 
-            # Performance analytics
+            # Performance
             attempts = QuizAttempt.objects()
             total_attempts = attempts.count()
-            average_score = round(sum(a.score for a in attempts) / total_attempts, 2) if total_attempts else 0
-
-            attempt_distribution = {}
-            for attempt in attempts:
-                key = attempt.difficulty or 'unknown'
-                attempt_distribution[key] = attempt_distribution.get(key, 0) + 1
+            avg_score = round(sum(a.score for a in attempts if a.score is not None) / total_attempts, 2) if total_attempts else 0
+            distribution = {}
+            for a in attempts:
+                key = a.difficulty or 'unknown'
+                distribution[key] = distribution.get(key, 0) + 1
 
             performance = {
                 'total_attempts': total_attempts,
-                'average_score': average_score,
-                'attempt_distribution': attempt_distribution
+                'average_score': avg_score,
+                'attempt_distribution': distribution
             }
 
-            # User count & details
+            # User details
             users = User.objects()
             user_data = []
-            for user in users:
-                user_attempts = QuizAttempt.objects(user=user)
-                user_data.append({
-                    'user_id': str(user.id),
-                    'full_name': user.full_name,
-                    'email': user.email,
-                    'total_attempts': user_attempts.count(),
-                    'total_score': sum(a.score for a in user_attempts)
-                })
+            for u in users:
+                try:
+                    user_attempts = QuizAttempt.objects(user=u)
+                    total_score = sum(a.score for a in user_attempts if a.score is not None)
+                    user_data.append({
+                        'user_id': str(u.id),
+                        'full_name': u.full_name,
+                        'email': u.email,
+                        'total_attempts': user_attempts.count(),
+                        'total_score': total_score
+                    })
+                except Exception:
+                    continue
 
             return Response({
                 'admin_id': str(admin.id),

@@ -19,7 +19,6 @@ class UserSignupView(APIView):
                 user = User(
                     full_name=data['full_name'],
                     phone_number=data['phone_number'],
-                    country_code=data['country_code'],
                     email=data['email'],
                     
                 )
@@ -40,8 +39,11 @@ class UserSignupView(APIView):
                     'user_id': str(user.id),
                 }, status=status.HTTP_201_CREATED)
                 
+            formatted_errors = {field: errors[0] if isinstance(errors, list) else errors
+                                for field, errors in serializer.errors.items()}
+            
             return Response(
-                {'message':'user already exists'},
+                {'message': formatted_errors},
                 status=status.HTTP_400_BAD_REQUEST
             )
             
@@ -130,10 +132,13 @@ class FeedbackView(APIView):
                 'message': 'Feedback submitted successfully'
             }, status=status.HTTP_201_CREATED)
                 
-            return Response({
-                'message':'invalid credantials'
-            },status=status.HTTP_400_BAD_REQUEST)
+            formatted_errors = {field: errors[0] if isinstance(errors, list) else errors
+                                for field, errors in serializer.errors.items()}
             
+            return Response(
+                {'message': formatted_errors},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         except User.DoesNotExist:
             return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
@@ -186,8 +191,10 @@ class ResetPasswordView(APIView):
 class UserDashboardView(APIView): 
     def post(self, request):
         token_key = request.data.get('token')
-        if not token_key:
-            return Response({'error': 'Token is required'}, status=status.HTTP_400_BAD_REQUEST)
+        user_id = request.data.get('user_id')  # Get user ID from request
+
+        if not token_key or not user_id:
+            return Response({'error': 'Token and user_id are required'}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
             token = UserToken.objects.get(token=token_key)
@@ -195,12 +202,13 @@ class UserDashboardView(APIView):
                 return Response({'error': 'Token has expired'}, status=status.HTTP_401_UNAUTHORIZED)
             
             user = token.user
+            if str(user.id) != str(user_id):
+                return Response({'error': 'Token does not match user_id'}, status=status.HTTP_403_FORBIDDEN)
+
             attempts = QuizAttempt.objects(user=user).order_by('-created_at')
             saved_quizzes = Quiz.objects(user=user).order_by('-created_at')
-            all_users = User.objects()
-            leaderboard = []
 
-            # Leaderboard: top users by score
+            # Leaderboard
             user_scores = {}
             for attempt in QuizAttempt.objects():
                 uid = str(attempt.user.id)
@@ -210,7 +218,7 @@ class UserDashboardView(APIView):
             leaderboard = [{'user_id': uid, 'total_score': score, 'rank': i+1} for i, (uid, score) in enumerate(sorted_leaderboard)]
             user_rank = next((entry['rank'] for entry in leaderboard if entry['user_id'] == str(user.id)), None)
 
-            # Quiz streak (consecutive days)
+            # Quiz streak
             streak = 0
             today = datetime.utcnow().date()
             days_played = sorted(set([a.created_at.date() for a in attempts]), reverse=True)
@@ -219,7 +227,8 @@ class UserDashboardView(APIView):
                     streak += 1
                 else:
                     break
-            # Weak topics: most incorrect answers
+
+            # Weak topics
             topic_errors = {}
             for attempt in attempts:
                 total = attempt.number_question
@@ -227,24 +236,22 @@ class UserDashboardView(APIView):
                 incorrect = total - correct
                 for topic in attempt.topics:
                     topic_errors[topic] = topic_errors.get(topic, 0) + incorrect
-
             weak_topics = sorted(topic_errors.items(), key=lambda x: x[1], reverse=True)[:5]
 
-            # Performance graph (date-wise score trend)
+            # Performance graph
             performance_graph = {}
             for attempt in attempts:
                 date_key = attempt.created_at.strftime('%Y-%m-%d')
                 performance_graph[date_key] = performance_graph.get(date_key, 0) + attempt.score
-                
+
             difficulty_stats = {'easy': 0, 'medium': 0, 'hard': 0}
             question_type_stats = {'mcq': 0, 'true_false': 0}
-
             for attempt in attempts:
                 if attempt.difficulty in difficulty_stats:
                     difficulty_stats[attempt.difficulty] += 1
                 if attempt.question_type in question_type_stats:
                     question_type_stats[attempt.question_type] += 1
-                    
+
             feedbacks = Feedback.objects(user=user).order_by('-created_at')
             feedback_history = FeedbackSerializer(feedbacks, many=True).data
 
@@ -263,7 +270,7 @@ class UserDashboardView(APIView):
                     'by_difficulty': difficulty_stats,
                     'by_question_type': question_type_stats
                 },
-                'feedback_history':feedback_history
+                'feedback_history': feedback_history
             }, status=status.HTTP_200_OK)
 
         except UserToken.DoesNotExist:
