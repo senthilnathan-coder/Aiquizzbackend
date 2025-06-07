@@ -43,10 +43,10 @@ class User(Document):
     def validate_phone_number(phone_number, country_code):
         try:
             phone_number = ''.join(filter(str.isdigit, phone_number))
-            country_code = ''.join(filter(lambda x: x.isdigit() or x == '+', country_code))
-            if not country_code.startswith('+'):
-                country_code = '+' + country_code
-            full_number = country_code + phone_number
+            # country_code = ''.join(filter(lambda x: x.isdigit() or x == '+', country_code))
+            # if not country_code.startswith('+'):
+            #     country_code = '+' + country_code
+            full_number = phone_number
             parsed_number = phonenumbers.parse(full_number)
             return phonenumbers.is_valid_number(parsed_number)
         except phonenumbers.phonenumberutil.NumberParseException:
@@ -61,14 +61,14 @@ class User(Document):
             return False
 
     def clean(self):
-        self.country_code = ''.join(filter(lambda x: x.isdigit() or x == '+', self.country_code))
-        if not self.country_code.startswith('+'):
-            self.country_code = '+' + self.country_code
+        # self.country_code = ''.join(filter(lambda x: x.isdigit() or x == '+', self.country_code))
+        # if not self.country_code.startswith('+'):
+        #     self.country_code = '+' + self.country_code
 
         self.phone_number = ''.join(filter(str.isdigit, self.phone_number))
 
-        if not self.validate_phone_number(self.phone_number, self.country_code):
-            raise ValueError(f"Invalid phone number for country code {self.country_code}")
+        if not self.validate_phone_number(self.phone_number):
+            raise ValueError(f"Invalid phone number")
 
         if not self.validate_email_address(self.email):
             raise ValueError("Invalid email address")
