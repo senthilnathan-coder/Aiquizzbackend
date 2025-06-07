@@ -11,103 +11,78 @@ from mongoengine.errors import DoesNotExist, ValidationError
 # Create your views here.
 class UserSignupView(APIView):
     def post(self, request):
-        try:
-            data = request.data
-            serializer = UserSerializer(data=data)
-            
-            if serializer.is_valid():
+        data = request.data
+        serializer = UserSerializer(data=data)
+        if serializer.is_valid():
+            try:
                 user = User(
                     full_name=data['full_name'],
                     phone_number=data['phone_number'],
                     email=data['email'],
-                    
                 )
                 user.set_password(data['password'], data['confirm_password'])
                 user.save()
-                
-                # otp=user.generate_otp()
+
+                # Uncomment to enable OTP email sending
+                # otp = user.generate_otp()
                 # send_mail(
-                #     subject='your OTP for email verification',
-                #     message=f'your OTP is:{otp}',
+                #     subject='Your OTP for email verification',
+                #     message=f'Your OTP is: {otp}',
                 #     from_email=settings.DEFAULT_FROM_EMAIL,
                 #     recipient_list=[user.email],
                 #     fail_silently=False
                 # )
-                
-                return Response({
-                    'message': 'User Register successfully.',
-                    'user_id': str(user.id),
-                }, status=status.HTTP_201_CREATED)
-                
-            formatted_errors = {field: errors[0] if isinstance(errors, list) else errors
-                                for field, errors in serializer.errors.items()}
-            
-            return Response(
-                {'message': formatted_errors},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-            
-            
-        except ValidationError as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+                return Response({'message': 'User registered successfully.', 'user_id': str(user.id)}, status=status.HTTP_201_CREATED)
+            except ValidationError as e:
+                return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            except Exception as e:
+                return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        else:
+            formatted_errors = {k: (v[0] if isinstance(v, list) else v) for k, v in serializer.errors.items()}
+            return Response({'message': formatted_errors}, status=status.HTTP_400_BAD_REQUEST)
         
-# class VerifyEmailOTPView(APIView):
-#     def post(self, request):
-#         try:
-#             email = request.data.get('email')
-#             otp = request.data.get('otp')
-#             user = User.objects.get(email=email)
-
-#             if user.verify_otp(otp):
-#                 user.is_verified = True
-#                 user.reset_otp = None
-#                 user.otp_expiry = None
-#                 user.save()
-#                 return Response({'message': 'Email verified successfully'}, status=status.HTTP_200_OK)
-#             return Response({'error': 'Invalid or expired OTP'}, status=status.HTTP_400_BAD_REQUEST)
-
-#         except User.DoesNotExist:
-#             return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-#         except Exception as e:
-#             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-class UserLoginView(APIView):
-    
+class VerifyEmailOTPView(APIView):
     def post(self, request):
+        email = request.data.get('email')
+        otp = request.data.get('otp')
+
+        if not email or not otp:
+            return Response({'error': 'Email and OTP are required.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            email = request.data.get('email')
-            password = request.data.get('password')
             user = User.objects.get(email=email)
-            
-            # if not user.is_verified:
-            #     return Response(
-            #         {'error': 'Email not verified. Please check your email for OTP.'},
-            #         status=status.HTTP_403_FORBIDDEN
-            #     )
-                
+            if user.verify_otp(otp):
+                user.is_verified = True
+                user.reset_otp = None
+                user.otp_expiry = None
+                user.save()
+                return Response({'message': 'Email verified successfully.'}, status=status.HTTP_200_OK)
+            return Response({'error': 'Invalid or expired OTP.'}, status=status.HTTP_400_BAD_REQUEST)
+        except User.DoesNotExist:
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+class UserLoginView(APIView):
+    def post(self, request):
+        email = request.data.get('email')
+        password = request.data.get('password')
+        if not email or not password:
+            return Response({'error': 'Email and password are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(email=email)
             if not user.check_password(password):
                 return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
 
             user.last_login = datetime.utcnow()
             user.save()
-
-            # Remove old tokens
             UserToken.objects(user=user).delete()
-            # Generate new token
             token = UserToken.generate_token(user)
 
-            return Response({
-                'message': 'Login successful',
-                'user_id': str(user.id),
-                'token': token.token
-            }, status=status.HTTP_200_OK)
-
+            return Response({'message': 'Login successful', 'user_id': str(user.id), 'token': token.token}, status=status.HTTP_200_OK)
         except User.DoesNotExist:
             return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
 class UserLogoutView(APIView):
     def post(self, request):
         token_str = request.data.get('token')
@@ -123,127 +98,118 @@ class UserLogoutView(APIView):
 class FeedbackView(APIView):
     def post(self, request, pk):
         try:
-            user=User.objects.get(pk=pk)
-                       
-            serializer=FeedbackSerializer(data=request.data)
-            if serializer.is_valid():
-                serializer.save(user=user)
-                return Response({
-                'message': 'Feedback submitted successfully'
-            }, status=status.HTTP_201_CREATED)
-                
-            formatted_errors = {field: errors[0] if isinstance(errors, list) else errors
-                                for field, errors in serializer.errors.items()}
-            
-            return Response(
-                {'message': formatted_errors},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            user = User.objects.only('id').get(pk=pk)
         except User.DoesNotExist:
             return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
+
+        serializer = FeedbackSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(user=user)
+            return Response({'message': 'Feedback submitted successfully'}, status=status.HTTP_201_CREATED)
+        else:
+            formatted_errors = {k: (v[0] if isinstance(v, list) else v) for k, v in serializer.errors.items()}
+            return Response({'message': formatted_errors}, status=status.HTTP_400_BAD_REQUEST)
+
 class ForgotPasswordView(APIView):
-    def post(self,request):
-        email=request.data.get('email')
+    def post(self, request):
+        email = request.data.get('email')
         if not email:
-            return Response({'error':'email is required'},status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'Email is required'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            user=User.objects.get(email=email)
-            otp=user.generate_otp()
-            
+            user = User.objects.get(email=email)
+            otp = user.generate_otp()
             send_mail(
                 subject="Your OTP for Password Reset",
                 message=f"Your OTP is: {otp}. It expires in 10 minutes.",
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[email],
-                fail_silently=False
+                fail_silently=False,
             )
-            return Response({'message':'OTP sent to email'},status=status.HTTP_200_OK)
+            return Response({'message': 'OTP sent to email'}, status=status.HTTP_200_OK)
         except User.DoesNotExist:
-            return Response({'message':'user not found'},status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e :
-            return Response({'message':str(e)},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            
-class ResetPasswordView(APIView):
-    def post(self,request):
-        email=request.data.get('email')
-        otp=request.data.get('otp')
-        password=request.data.get('password')
-        confirm_password=request.data.get('confirm_password')
-        if not all([email,otp,password,confirm_password]):
-            return Response({'message':'All fields are required'},status=status.HTTP_400_BAD_REQUEST)
-        try:
-            user=User.objects.get(email=email)
-            if not user.verify_otp(otp):
-                return Response({'message':'invalid OTP'},status=status.HTTP_400_BAD_REQUEST)
-            user.set_password(password,confirm_password)
-            user.reset_otp=None
-            user.otp_expiry=None
-            user.save()
-            return Response({'message':'password reset succussfully'},status=status.HTTP_200_OK)
-        except User.DoesNotExist:
-            return Response({'message':'user not found'},status=status.HTTP_404_NOT_FOUND)
+            return Response({'message': 'User not found'}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-            return Response({'message':str(e)},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-class UserDashboardView(APIView): 
+            return Response({'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class ResetPasswordView(APIView):
+    def post(self, request):
+        email = request.data.get('email')
+        otp = request.data.get('otp')
+        password = request.data.get('password')
+        confirm_password = request.data.get('confirm_password')
+
+        if not all([email, otp, password, confirm_password]):
+            return Response({'message': 'All fields are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(email=email)
+            if not user.verify_otp(otp):
+                return Response({'message': 'Invalid OTP'}, status=status.HTTP_400_BAD_REQUEST)
+            user.set_password(password, confirm_password)
+            user.reset_otp = None
+            user.otp_expiry = None
+            user.save()
+            return Response({'message': 'Password reset successfully'}, status=status.HTTP_200_OK)
+        except User.DoesNotExist:
+            return Response({'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class UserDashboardView(APIView):
     def post(self, request):
         token_key = request.data.get('token')
-        user_id = request.data.get('user_id')  # Get user ID from request
+        user_id = request.data.get('user_id')
 
         if not token_key or not user_id:
             return Response({'error': 'Token and user_id are required'}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         try:
             token = UserToken.objects.get(token=token_key)
             if token.expires_at < datetime.utcnow():
                 return Response({'error': 'Token has expired'}, status=status.HTTP_401_UNAUTHORIZED)
-            
+
             user = token.user
             if str(user.id) != str(user_id):
                 return Response({'error': 'Token does not match user_id'}, status=status.HTTP_403_FORBIDDEN)
 
-            attempts = QuizAttempt.objects(user=user).order_by('-created_at')
-            saved_quizzes = Quiz.objects(user=user).order_by('-created_at')
+            attempts = QuizAttempt.objects(user=user).order_by('-created_at').only('score', 'number_question', 'topics', 'created_at', 'difficulty', 'question_type')
+            saved_quizzes = Quiz.objects(user=user).order_by('-created_at').only('title', 'created_at')
 
-            # Leaderboard
+            # Leaderboard calculation (cache to dict)
             user_scores = {}
-            for attempt in QuizAttempt.objects():
+            for attempt in QuizAttempt.objects.only('user', 'score'):
                 uid = str(attempt.user.id)
                 user_scores[uid] = user_scores.get(uid, 0) + attempt.score
 
             sorted_leaderboard = sorted(user_scores.items(), key=lambda x: x[1], reverse=True)
-            leaderboard = [{'user_id': uid, 'total_score': score, 'rank': i+1} for i, (uid, score) in enumerate(sorted_leaderboard)]
+            leaderboard = [{'user_id': uid, 'total_score': score, 'rank': i + 1} for i, (uid, score) in enumerate(sorted_leaderboard)]
             user_rank = next((entry['rank'] for entry in leaderboard if entry['user_id'] == str(user.id)), None)
 
-            # Quiz streak
+            # Quiz streak calculation
             streak = 0
             today = datetime.utcnow().date()
-            days_played = sorted(set([a.created_at.date() for a in attempts]), reverse=True)
+            days_played = sorted({a.created_at.date() for a in attempts}, reverse=True)
             for i, day in enumerate(days_played):
                 if (today - timedelta(days=i)) == day:
                     streak += 1
                 else:
                     break
 
-            # Weak topics
+            # Weak topics calculation
             topic_errors = {}
             for attempt in attempts:
-                total = attempt.number_question
-                correct = attempt.score
-                incorrect = total - correct
+                incorrect = attempt.number_question - attempt.score
                 for topic in attempt.topics:
                     topic_errors[topic] = topic_errors.get(topic, 0) + incorrect
             weak_topics = sorted(topic_errors.items(), key=lambda x: x[1], reverse=True)[:5]
 
-            # Performance graph
+            # Performance graph (date: total score)
             performance_graph = {}
             for attempt in attempts:
                 date_key = attempt.created_at.strftime('%Y-%m-%d')
                 performance_graph[date_key] = performance_graph.get(date_key, 0) + attempt.score
 
+            # Difficulty and question type stats
             difficulty_stats = {'easy': 0, 'medium': 0, 'hard': 0}
             question_type_stats = {'mcq': 0, 'true_false': 0}
             for attempt in attempts:
@@ -270,7 +236,7 @@ class UserDashboardView(APIView):
                     'by_difficulty': difficulty_stats,
                     'by_question_type': question_type_stats
                 },
-                'feedback_history': feedback_history
+                'feedback_history': feedback_history,
             }, status=status.HTTP_200_OK)
 
         except UserToken.DoesNotExist:

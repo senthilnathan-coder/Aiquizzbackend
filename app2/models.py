@@ -15,19 +15,25 @@ class User(Document):
     email = EmailField(required=True, unique=True)
     password_hash = StringField(required=True)
     is_active = BooleanField(default=True)
-    reset_otp=StringField()
-    otp_expiry=DateTimeField()
     is_verified = BooleanField(default=False)
+    reset_otp = StringField()
+    otp_expiry = DateTimeField()
     created_at = DateTimeField(default=datetime.utcnow)
     last_login = DateTimeField(default=datetime.utcnow)
 
     meta = {
         'collection': 'users',
-        'indexes': [
-            'email',
-            'phone_number'
-        ]
+        'indexes': ['email', 'phone_number', 'is_verified']
     }
+
+    def clean(self):
+        self.phone_number = ''.join(filter(str.isdigit, self.phone_number))
+        if not (len(self.phone_number) == 10 and self.phone_number[0] in '6789'):
+            raise ValueError("Invalid Indian phone number")
+        try:
+            validate_email(self.email)
+        except EmailNotValidError:
+            raise ValueError("Invalid email address")
 
     def set_password(self, password, confirm_password):
         if password != confirm_password:
@@ -39,61 +45,36 @@ class User(Document):
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
 
-    @staticmethod
-    def validate_phone_number(phone_number):
-        phone_number = ''.join(filter(str.isdigit, phone_number))
-    # Check if it's a 10-digit Indian mobile number starting with 6-9
-        if len(phone_number) == 10 and phone_number[0] in '6789':
-            return True
-        return False
-
-
-    @staticmethod
-    def validate_email_address(email):
-        try:
-            validate_email(email)
-            return True
-        except EmailNotValidError:
-            return False
-
-    def clean(self):
-        # self.country_code = ''.join(filter(lambda x: x.isdigit() or x == '+', self.country_code))
-        # if not self.country_code.startswith('+'):
-        #     self.country_code = '+' + self.country_code
-
-        self.phone_number = ''.join(filter(str.isdigit, self.phone_number))
-
-        if not self.validate_phone_number(self.phone_number):
-            raise ValueError(f"Invalid phone number")
-
-        if not self.validate_email_address(self.email):
-            raise ValueError("Invalid email address")
-
-        if not self.full_name or len(self.full_name.strip()) < 2:
-            raise ValueError("Full name must be at least 2 characters long")
-        
     def generate_otp(self):
-        otp=''.join(random.choices(string.digits,k=6))
-        self.reset_otp=otp
-        self.otp_expiry=datetime.utcnow()+timedelta(minutes=10)
+        otp = ''.join(random.choices(string.digits, k=6))
+        self.reset_otp = otp
+        self.otp_expiry = datetime.utcnow() + timedelta(minutes=10)
         self.save()
         return otp
-    def verify_otp(self,otp):
-        return self.reset_otp == otp and datetime.utcnow() <= self.otp_expiry
-        
+
+    def verify_otp(self, otp):
+        return self.reset_otp == otp and self.otp_expiry and datetime.utcnow() <= self.otp_expiry
+
+
 class UserToken(Document):
-    token=StringField(required=True,unique=True)
-    user=ReferenceField(User,required=True)
-    create_at=DateTimeField(default=datetime.utcnow)
-    expires_at=DateTimeField(required=True)
-    
+    token = StringField(required=True, unique=True)
+    user = ReferenceField(User, required=True)
+    created_at = DateTimeField(default=datetime.utcnow)
+    expires_at = DateTimeField(required=True)
+
+    meta = {'indexes': ['token', 'user']}
+
+    @staticmethod
     def generate_token(user):
-        token_str=str(uuid.uuid4())
-        expires_at=datetime.utcnow()+timedelta(days=21)
-        token=UserToken(token=token_str,user=user,expires_at=expires_at)
+        token_str = str(uuid.uuid4())
+        token = UserToken(
+            token=token_str,
+            user=user,
+            expires_at=datetime.utcnow() + timedelta(days=21)
+        )
         token.save()
         return token
-    
+
 
 class Feedback(Document):
     user = ReferenceField(User, required=True)
@@ -105,6 +86,5 @@ class Feedback(Document):
 
     meta = {
         'collection': 'feedback',
-        'indexes': ['user', 'type', 'status', 'created_at']
+        'indexes': ['user', 'type', 'status']
     }
-    
