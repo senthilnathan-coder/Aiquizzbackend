@@ -73,22 +73,24 @@ class QuizAttempt(Document):
         'auto_create_index': True
     }
     
-# class UserPayment(Document):
-#     user=ReferenceField(User,required=True)
-#     amount=IntField()
-#     is_paid=BooleanField(required=True)
-#     payment_at=DateTimeField(default=datetime.utcnow())
+class UserPayment(Document):
+    user=ReferenceField(User,required=True)
+    amount=IntField()
+    is_paid=BooleanField(required=True)
+    payment_at=DateTimeField(default=datetime.utcnow())
     
-#     meta={
-#         'collection':'payment'
-#     }
+    meta={
+        'collection':'payment'
+    }
     
-#     @property
-#     def quiz_credits(self):
-#         return  self.amount // 2
+    @property
+    def quiz_credits(self):
+        return self.amount // 50
 
-# class Paidquizusage(Document):
-#     user=ReferenceField(User,required=True)
-#     Payment=ReferenceField(UserPayment,required=True)
-#     used_count=IntField(default=0)
+class PaidQuizUsage(Document):
+    user=ReferenceField(User,required=True)
+    payment=ReferenceField(UserPayment,required=True)
+    used_count=IntField(default=0)
+    
+    meta = {'collection': 'paid_quiz_usage'}
     

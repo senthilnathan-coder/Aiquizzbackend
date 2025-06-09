@@ -12,7 +12,6 @@ from PyPDF2 import PdfReader
 from pptx import Presentation
 from openpyxl import load_workbook
 import mammoth
-
 from app.models import *
 from app2.models import *
 from app.serializers import *
@@ -110,6 +109,28 @@ def parse_questions(response_text, question_type='mcq'):
         print(f"Error parsing questions: {str(e)}")
     return questions
 
+class MockPaymentView(APIView):
+    def post(self, request):
+        token = request.data.get('token')
+        user_id = request.data.get('user_id')
+        amount = int(request.data.get('amount', 0))
+
+        if amount % 50 != 0:
+            return Response({'error': 'Invalid amount. Must be in multiples of ₹50.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            token_obj = UserToken.objects.get(token=token, user=user_id)
+            user = token_obj.user
+
+            payment = UserPayment(user=user, amount=amount, is_paid=True, payment_at=datetime.utcnow())
+            payment.save()
+
+            return Response({'message': f'Payment of ₹{amount} received. You have {amount // 50} quiz credits.'}, status=status.HTTP_200_OK)
+
+        except UserToken.DoesNotExist:
+            return Response({'error': 'Invalid token'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class MultimodalQuizView(APIView):
     def get(self, request, pk):
@@ -136,15 +157,27 @@ class MultimodalQuizView(APIView):
             user = token.user
             if not user.is_verified:
                 return Response({'message':'user is not verified'},status=status.HTTP_400_BAD_REQUEST)
-            # quiz_count=Quiz.objects(user=user).count()
-            # if quiz_count >=10:
-            #     last_payment=Payment.objects(user=user,is_paid=True).order_by('-payment_time').first()
-            #     if not last_payment or last_payment.payment_time <user.last_quiz_created_at:
-            #         return Response({
-            #              'error': 'Free limit exceeded. Please pay ₹50 to generate the next quiz.',
-            #             'payment_required': True,
-            #             'amount': 50
-            #         }, status=status.HTTP_402_PAYMENT_REQUIRED)
+            total_quiz_count = Quiz.objects(user=user).only('id').count()
+            free_limit = 10
+
+            if total_quiz_count >= free_limit:
+                paid_payments = UserPayment.objects(user=user, is_paid=True).order_by('payment_at')
+                total_credits = sum(p.quiz_credits for p in paid_payments)
+                used_credits = sum((u.used_count for u in PaidQuizUsage.objects(user=user, payment__in=paid_payments).only('used_count')))
+
+                if used_credits >= total_credits:
+                    return Response({
+                        'error': 'Payment required.you have used free limits',
+                    }, status=status.HTTP_402_PAYMENT_REQUIRED)
+
+                for payment in paid_payments:
+                    usage = PaidQuizUsage.objects(user=user, payment=payment).first()
+                    if not usage:
+                        usage = PaidQuizUsage(user=user, payment=payment, used_count=0)
+                    if usage.used_count < payment.quiz_credits:
+                        usage.used_count += 1
+                        usage.save()
+                        break
             
             data, files = request.data, request.FILES
             content_text = data.get('text', '').strip()
@@ -223,6 +256,7 @@ class MultimodalQuizView(APIView):
         except Exception as e:
             return Response({'error': str(e)}, status=500)
 
+
 class SubmitQuizView(APIView):
     def post(self, request, pk):
         try:
@@ -284,3 +318,4 @@ class SubmitQuizView(APIView):
             return Response({'error': 'Quiz not found'}, status=404)
         except Exception as e:
             return Response({'error': str(e)}, status=500)
+

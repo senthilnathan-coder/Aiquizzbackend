@@ -169,6 +169,21 @@ class ResetPasswordView(APIView):
             return Response({'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class UserDashboardView(APIView):
+    def get(self,request,pk):
+        try:
+             user=User.objects.get(pk=pk)
+             user_data=[
+                 {
+                     "full_name":user.full_name,
+                     "phone_number":user.phone_number,
+                     "email":user.email
+                 }
+             ]
+             if not user:
+                 return Response({'user not found'},status=400)
+             return Response({'user_data':user_data},status=200)
+        except Exception as e:
+            return Response({'message':str(e)},status=500)
     def post(self, request):
         token_key = request.data.get('token')
         user_id = request.data.get('user_id')
@@ -256,23 +271,16 @@ class UserDashboardView(APIView):
             return Response({'error': 'Invalid token'}, status=status.HTTP_401_UNAUTHORIZED)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-class UserGetView(APIView):
-    def get(self,request,pk):
-        try:
-             user=User.objects.get(pk=pk)
-             user_data=[
-                 {
-                     "full_name":user.full_name,
-                     "phone_number":user.phone_number,
-                     "email":user.email
-                 }
-             ]
-             if not user:
-                 return Response({'user not found'},status=400)
-             return Response({'user_data':user_data},status=200)
-        except Exception as e:
-            return Response({'message':str(e)},status=500)
-        
+    # def put(self,request):
+    #     user_id=request.data.get('user_id')
+    #     if not user_id:
+    #         return Response({'message':"userid is required "},status=status.HTTP_400_BAD_REQUEST)
+    #     try:
+    #         user=User.objects(id=user_id).first()
+    #         if not user:
+    #             return Response({'message':'user not found'})
+    #         updated=False
+            
+                
       
         

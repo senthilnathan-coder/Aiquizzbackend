@@ -53,6 +53,7 @@ INSTALLED_APPS = [
 
 # CORS settings
 CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
     "http://localhost:5174",
     "https://6842b5d00c029a9a1950199b--digiaiquestt.netlify.app"
 ]
