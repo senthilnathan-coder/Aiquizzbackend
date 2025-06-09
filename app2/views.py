@@ -13,34 +13,36 @@ class UserSignupView(APIView):
     def post(self, request):
         data = request.data
         serializer = UserSerializer(data=data)
-        if serializer.is_valid():
-            try:
-                user = User(
-                    full_name=data['full_name'],
-                    phone_number=data['phone_number'],
-                    email=data['email'],
-                )
-                user.set_password(data['password'], data['confirm_password'])
-                user.save()
 
-                # Uncomment to enable OTP email sending
-                # otp = user.generate_otp()
-                # send_mail(
-                #     subject='Your OTP for email verification',
-                #     message=f'Your OTP is: {otp}',
-                #     from_email=settings.DEFAULT_FROM_EMAIL,
-                #     recipient_list=[user.email],
-                #     fail_silently=False
-                # )
+        if not serializer.is_valid():
+            errors = {k: (v[0] if isinstance(v, list) else v) for k, v in serializer.errors.items()}
+            return Response({'message': errors}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            user = User(
+                full_name=data['full_name'],
+                phone_number=data['phone_number'],
+                email=data['email'],
+            )
+            user.set_password(data['password'], data['confirm_password'])
+            user.save()
 
-                return Response({'message': 'User registered successfully.', 'user_id': str(user.id)}, status=status.HTTP_201_CREATED)
-            except ValidationError as e:
-                return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-            except Exception as e:
-                return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        else:
-            formatted_errors = {k: (v[0] if isinstance(v, list) else v) for k, v in serializer.errors.items()}
-            return Response({'message': formatted_errors}, status=status.HTTP_400_BAD_REQUEST)
+            otp = user.generate_otp()
+            send_mail(
+                subject='Your OTP for email verification',
+                message=f'Your OTP is: {otp}',
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=False
+            )
+            return Response({
+                'message': 'User registered successfully. Verification OTP sent to your email.',
+                'user_id': str(user.id)
+            }, status=status.HTTP_201_CREATED)
+
+        except ValidationError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
 class VerifyEmailOTPView(APIView):
     def post(self, request):
@@ -67,18 +69,29 @@ class UserLoginView(APIView):
         password = request.data.get('password')
         if not email or not password:
             return Response({'error': 'Email and password are required'}, status=status.HTTP_400_BAD_REQUEST)
-
         try:
             user = User.objects.get(email=email)
+
+            # ✅ Check if user is verified
+            if not user.is_verified:
+                return Response({'error': 'Email not verified. Please verify to continue'}, status=status.HTTP_403_FORBIDDEN)
+
             if not user.check_password(password):
                 return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
 
             user.last_login = datetime.utcnow()
             user.save()
+            # Remove old token(s)
             UserToken.objects(user=user).delete()
+            # Generate new token
             token = UserToken.generate_token(user)
 
-            return Response({'message': 'Login successful', 'user_id': str(user.id), 'token': token.token}, status=status.HTTP_200_OK)
+            return Response({
+                'message': 'Login successful',
+                'user_id': str(user.id),
+                'token': token.token
+            }, status=status.HTTP_200_OK)
+
         except User.DoesNotExist:
             return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
         except Exception as e:
@@ -243,3 +256,23 @@ class UserDashboardView(APIView):
             return Response({'error': 'Invalid token'}, status=status.HTTP_401_UNAUTHORIZED)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class UserGetView(APIView):
+    def get(self,request,pk):
+        try:
+             user=User.objects.get(pk=pk)
+             user_data=[
+                 {
+                     "full_name":user.full_name,
+                     "phone_number":user.phone_number,
+                     "email":user.email
+                 }
+             ]
+             if not user:
+                 return Response({'user not found'},status=400)
+             return Response({'user_data':user_data},status=200)
+        except Exception as e:
+            return Response({'message':str(e)},status=500)
+        
+      
+        

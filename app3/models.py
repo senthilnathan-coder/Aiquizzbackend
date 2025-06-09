@@ -10,10 +10,9 @@ class Admin(Document):
     email = EmailField(required=True)
     password_hash = StringField(required=True)  # Changed from password to password_hash
     is_active = BooleanField(default=True)
-    # role=StringField(required=True)
     reset_otp=StringField()
     otp_expiry=DateTimeField()
-    # is_verified=BooleanField(default=False)
+    is_verified=BooleanField(default=False)
     created_at = DateTimeField(default=datetime.utcnow)
     last_login = DateTimeField(default=datetime.utcnow)
     
