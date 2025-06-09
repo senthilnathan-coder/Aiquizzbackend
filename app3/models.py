@@ -2,7 +2,7 @@ from django.db import models
 # Create your models here.
 from mongoengine import *
 from datetime import datetime,timedelta
-import bcrypt
+from werkzeug.security import generate_password_hash, check_password_hash
 from email_validator import validate_email, EmailNotValidError
 import random,string
 
@@ -21,11 +21,15 @@ class Admin(Document):
         'indexes': ['email']
     }
     
-    def set_password(self, password):
-        self.password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    def set_password(self, password, confirm_password):
+        if password != confirm_password:
+            raise ValueError("Passwords do not match")
+        if len(password) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        self.password_hash = generate_password_hash(password)
 
     def check_password(self, password):
-        return bcrypt.checkpw(password.encode('utf-8'), self.password_hash.encode('utf-8'))
+        return check_password_hash(self.password_hash, password)
         
     @staticmethod
     def validate_email_address(email):
