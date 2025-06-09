@@ -18,6 +18,7 @@ class UserSignupView(APIView):
             errors = {k: (v[0] if isinstance(v, list) else v) for k, v in serializer.errors.items()}
             return Response({'message': errors}, status=status.HTTP_400_BAD_REQUEST)
         try:
+           
             user = User(
                 full_name=data['full_name'],
                 phone_number=data['phone_number'],
@@ -46,13 +47,12 @@ class UserSignupView(APIView):
         
 class VerifyEmailOTPView(APIView):
     def post(self, request):
-        email = request.data.get('email')
         otp = request.data.get('otp')
 
-        if not email or not otp:
-            return Response({'error': 'Email and OTP are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not otp:
+            return Response({'error': ' OTP is required.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            user = User.objects.get(email=email)
+            user = User.objects.get(reset_otp=otp)
             if user.verify_otp(otp):
                 user.is_verified = True
                 user.reset_otp = None
