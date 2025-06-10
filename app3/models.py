@@ -6,6 +6,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from email_validator import validate_email, EmailNotValidError
 import random,string
 
+DEFAULT_EMAIL_OTP="123456"
+DEFAULT_OTP_EXPIRY_MINUTES=10
 class Admin(Document):
     email = EmailField(required=True)
     password_hash = StringField(required=True)  # Changed from password to password_hash
@@ -38,12 +40,12 @@ class Admin(Document):
             return True
         except EmailNotValidError:
             return False  # Changed from True to False
-    def generate_otp(self):
-        otp=''.join(random.choices(string.digits,k=6))
-        self.reset_otp=otp
-        self.otp_expiry=datetime.utcnow()+timedelta(minutes=10)
-        self.save()
-        return otp
+    # def generate_otp(self):
+    #     otp=''.join(random.choices(string.digits,k=6))
+    #     self.reset_otp=otp
+    #     self.otp_expiry=datetime.utcnow()+timedelta(minutes=10)
+    #     self.save()
+    #     return otp
     def verify_otp(self,otp):
         return self.reset_otp == otp and datetime.utcnow() <= self.otp_expiry
         

@@ -8,6 +8,8 @@ import random,string
 import uuid
 import hashlib
 
+DEFAULT_EMAIL_OTP="123456"
+DEFAULT_OTP_EXPIRY_MINUTES=10
 # Create your models here.
 class User(Document):
     full_name = StringField(required=True, min_length=2, max_length=100)
@@ -21,6 +23,7 @@ class User(Document):
     created_at = DateTimeField(default=datetime.utcnow)
     last_login = DateTimeField(default=datetime.utcnow)
     last_quiz_created_at = DateTimeField(default=datetime(2000, 1, 1))
+    # profile =DictField(default=dict)
 
     meta = {
         'collection': 'users',
@@ -46,12 +49,12 @@ class User(Document):
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
 
-    def generate_otp(self):
-        otp = ''.join(random.choices(string.digits, k=6))
-        self.reset_otp = otp
-        self.otp_expiry = datetime.utcnow() + timedelta(minutes=10)
-        self.save()
-        return otp
+    # def generate_otp(self):
+    #     otp = ''.join(random.choices(string.digits, k=6))
+    #     self.reset_otp = otp
+    #     self.otp_expiry = datetime.utcnow() + timedelta(minutes=10)
+    #     self.save()
+    #     return otp
 
     def verify_otp(self, otp):
         return self.reset_otp == otp and self.otp_expiry and datetime.utcnow() <= self.otp_expiry

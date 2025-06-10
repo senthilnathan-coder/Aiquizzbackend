@@ -18,23 +18,19 @@ class UserSignupView(APIView):
             errors = {k: (v[0] if isinstance(v, list) else v) for k, v in serializer.errors.items()}
             return Response({'message': errors}, status=status.HTTP_400_BAD_REQUEST)
         try:
-           
-            user = User(
-                full_name=data['full_name'],
-                phone_number=data['phone_number'],
-                email=data['email'],
-            )
-            user.set_password(data['password'], data['confirm_password'])
+            user = serializer.save()
+            user.reset_otp=DEFAULT_EMAIL_OTP
+            user.otp_expiry=datetime.utcnow()+timedelta(DEFAULT_OTP_EXPIRY_MINUTES)
             user.save()
 
-            otp = user.generate_otp()
-            send_mail(
-                subject='Your OTP for email verification',
-                message=f'Your OTP is: {otp}',
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                fail_silently=False
-            )
+            # otp = user.generate_otp()
+            # send_mail(
+            #     subject='Your OTP for email verification',
+            #     message=f'Your OTP is: {otp}',
+            #     from_email=settings.DEFAULT_FROM_EMAIL,
+            #     recipient_list=[user.email],
+            #     fail_silently=False
+            # )
             return Response({
                 'message': 'User registered successfully. Verification OTP sent to your email.',
                 'user_id': str(user.id)
@@ -48,11 +44,12 @@ class UserSignupView(APIView):
 class VerifyEmailOTPView(APIView):
     def post(self, request):
         otp = request.data.get('otp')
+        email=request.data.get('email')
 
-        if not otp:
-            return Response({'error': ' OTP is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not email or not otp:
+            return Response({'error': 'email and OTP is required.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            user = User.objects.get(reset_otp=otp)
+            user = User.objects.get(email=email)
             if user.verify_otp(otp):
                 user.is_verified = True
                 user.reset_otp = None
@@ -271,16 +268,9 @@ class UserDashboardView(APIView):
             return Response({'error': 'Invalid token'}, status=status.HTTP_401_UNAUTHORIZED)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    # def put(self,request):
-    #     user_id=request.data.get('user_id')
-    #     if not user_id:
-    #         return Response({'message':"userid is required "},status=status.HTTP_400_BAD_REQUEST)
-    #     try:
-    #         user=User.objects(id=user_id).first()
-    #         if not user:
-    #             return Response({'message':'user not found'})
-    #         updated=False
-            
+   
+
+  
                 
       
         

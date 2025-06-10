@@ -39,17 +39,19 @@ class AdminsignupView(APIView):
 
             admin = Admin(email=email)
             admin.set_password(data['password'],data['confirm_password'])
+            admin.reset_otp=DEFAULT_EMAIL_OTP
+            admin.otp_expiry=datetime.utcnow()+timedelta(DEFAULT_OTP_EXPIRY_MINUTES)
             admin.save()
 
             # Optional: Generate and send OTP
-            otp = admin.generate_otp()
-            send_mail(
-                subject='Verify your admin email',
-                message=f'Your OTP is: {otp}',
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[email],
-                fail_silently=False
-            )
+            # otp = admin.generate_otp()
+            # send_mail(
+            #     subject='Verify your admin email',
+            #     message=f'Your OTP is: {otp}',
+            #     from_email=settings.DEFAULT_FROM_EMAIL,
+            #     recipient_list=[email],
+            #     fail_silently=False
+            # )
 
             return Response({
                 'message': 'Admin signup successful. Verification OTP sent to email.',

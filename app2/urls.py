@@ -9,5 +9,6 @@ urlpatterns=[
     path('userdashboard/', UserDashboardView.as_view(), name='dashboard'),
     path('user/feedback/<str:pk>/',FeedbackView.as_view(),name='feedback'),
     path('user/forgotpassword/',ForgotPasswordView.as_view(),name='forgotpassword'),
-    path('user/resetpassword/',ResetPasswordView.as_view(),name='resetpassword')
+    path('user/resetpassword/',ResetPasswordView.as_view(),name='resetpassword'),
+    
 ]
