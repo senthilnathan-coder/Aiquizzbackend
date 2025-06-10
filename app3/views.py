@@ -38,7 +38,7 @@ class AdminsignupView(APIView):
                 return Response({'error': 'Email already registered'}, status=status.HTTP_400_BAD_REQUEST)
 
             admin = Admin(email=email)
-            admin.set_password(data['password'])
+            admin.set_password(data['password'],data['confirm_password'])
             admin.save()
 
             # Optional: Generate and send OTP
@@ -61,19 +61,15 @@ class AdminsignupView(APIView):
         
 class VerifyAdminOTPView(APIView):
     def post(self, request):
-        email = request.data.get('email')
         otp = request.data.get('otp')
 
-        if not email or not otp:
-            return Response({'error': 'Email and OTP are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not otp:
+            return Response({'error': 'OTP is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            admin = Admin.objects(email=email).first()
+            admin = Admin.objects(reset_otp=otp).first()
             if not admin:
                 return Response({'error': 'Admin not found'}, status=status.HTTP_404_NOT_FOUND)
-
-            if admin.is_verified:
-                return Response({'message': 'Email is already verified.'}, status=status.HTTP_200_OK)
 
             if admin.verify_otp(otp):
                 admin.update(
