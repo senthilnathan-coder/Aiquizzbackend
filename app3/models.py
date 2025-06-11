@@ -7,13 +7,13 @@ from email_validator import validate_email, EmailNotValidError
 import random,string
 
 DEFAULT_EMAIL_OTP="123456"
-DEFAULT_OTP_EXPIRY_MINUTES=10
+# DEFAULT_OTP_EXPIRY_MINUTES=10
 class Admin(Document):
     email = EmailField(required=True)
     password_hash = StringField(required=True)  # Changed from password to password_hash
     is_active = BooleanField(default=True)
     reset_otp=StringField()
-    otp_expiry=DateTimeField()
+    # otp_expiry=DateTimeField()
     is_verified=BooleanField(default=False)
     created_at = DateTimeField(default=datetime.utcnow)
     last_login = DateTimeField(default=datetime.utcnow)
@@ -47,7 +47,7 @@ class Admin(Document):
     #     self.save()
     #     return otp
     def verify_otp(self,otp):
-        return self.reset_otp == otp and datetime.utcnow() <= self.otp_expiry
+        return self.reset_otp == otp 
         
 class AdminToken(Document):
     admintoken = StringField(required=True, unique=True)

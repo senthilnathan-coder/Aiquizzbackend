@@ -28,19 +28,19 @@ class AdminsignupView(APIView):
                     field: errors[0] if isinstance(errors, list) else errors
                     for field, errors in serializer.errors.items()
                 }
-                return Response({'errors': formatted_errors}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'status': 0,'errors': formatted_errors}, status=status.HTTP_400_BAD_REQUEST)
 
             email = data['email']
             if not Admin.validate_email_address(email):
-                return Response({'error': 'Invalid email format'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'status': 0,'error': 'Invalid email format'}, status=status.HTTP_400_BAD_REQUEST)
 
             if Admin.objects(email=email).first():
-                return Response({'error': 'Email already registered'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'status': 0,'error': 'Email already registered'}, status=status.HTTP_400_BAD_REQUEST)
 
             admin = Admin(email=email)
             admin.set_password(data['password'],data['confirm_password'])
             admin.reset_otp=DEFAULT_EMAIL_OTP
-            admin.otp_expiry=datetime.utcnow()+timedelta(DEFAULT_OTP_EXPIRY_MINUTES)
+            # admin.otp_expiry=datetime.utcnow()+timedelta(DEFAULT_OTP_EXPIRY_MINUTES)
             admin.save()
 
             # Optional: Generate and send OTP
@@ -54,6 +54,7 @@ class AdminsignupView(APIView):
             # )
 
             return Response({
+                'status': 1,
                 'message': 'Admin signup successful. Verification OTP sent to email.',
                 'admin_id': str(admin.id)
             }, status=status.HTTP_201_CREATED)
@@ -66,12 +67,14 @@ class VerifyAdminOTPView(APIView):
         otp = request.data.get('otp')
 
         if not otp:
-            return Response({'error': 'OTP is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'status': 0,'error': 'OTP is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            admin = Admin.objects(reset_otp=otp).first()
+            if otp != DEFAULT_EMAIL_OTP:
+                return Response({'status': 0, 'error': 'Invalid OTP.'}, status=status.HTTP_400_BAD_REQUEST)
+            admin = Admin.objects(reset_otp=DEFAULT_EMAIL_OTP, is_verified=False).first()
             if not admin:
-                return Response({'error': 'Admin not found'}, status=status.HTTP_404_NOT_FOUND)
+                return Response({'status': 0,'error': 'Admin not found'}, status=status.HTTP_404_NOT_FOUND)
 
             if admin.verify_otp(otp):
                 admin.update(
@@ -79,12 +82,12 @@ class VerifyAdminOTPView(APIView):
                     set__reset_otp=None,
                     set__otp_expiry=None
                 )
-                return Response({'message': 'Email verified successfully.'}, status=status.HTTP_200_OK)
+                return Response({'status': 1,'message': 'Email verified successfully.'}, status=status.HTTP_200_OK)
 
-            return Response({'error': 'Invalid or expired OTP.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'status': 0,'error': 'Invalid or expired OTP.'}, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'status': 0,'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class AdminsigninView(APIView):
@@ -95,17 +98,17 @@ class AdminsigninView(APIView):
             password = data.get('password')
 
             if not email or not password:
-                return Response({'error': 'All fields are required'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'status': 0,'error': 'All fields are required'}, status=status.HTTP_400_BAD_REQUEST)
 
             admin = Admin.objects(email=email).first()
             if not admin or not admin.check_password(password):
-                return Response({'error': 'Invalid email or password'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'status': 0,'error': 'Invalid email or password'}, status=status.HTTP_400_BAD_REQUEST)
 
             if not admin.is_verified:
-                return Response({'error': 'Email not verified. Please verify to continue.'}, status=status.HTTP_401_UNAUTHORIZED)
+                return Response({'status': 0,'error': 'Email not verified. Please verify to continue.'}, status=status.HTTP_401_UNAUTHORIZED)
 
             if not admin.is_active:
-                return Response({'error': 'Admin is inactive'}, status=status.HTTP_403_FORBIDDEN)
+                return Response({'status': 0,'error': 'Admin is inactive'}, status=status.HTTP_403_FORBIDDEN)
 
             admin.update(set__last_login=datetime.utcnow())  # Faster than admin.save()
 
@@ -116,6 +119,7 @@ class AdminsigninView(APIView):
             AdminToken(admintoken=token_str, admin=admin, expires_at=expires_at).save()
 
             return Response({
+                'status': 1,
                 'message': 'Admin login successful',
                 'admin': admin.email,
                 'admintoken': token_str
@@ -130,14 +134,14 @@ class AdminLogoutView(APIView):
         try:
             token_str = request.data.get('admintoken')
             if not token_str:
-                return Response({'error': 'Token is required'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'status': 0,'error': 'Token is required'}, status=status.HTTP_400_BAD_REQUEST)
 
             admintoken = AdminToken.objects(admintoken=token_str).first()
             if not admintoken:
-                return Response({'error': 'Invalid or expired token'}, status=status.HTTP_401_UNAUTHORIZED)
+                return Response({'status': 0,'error': 'Invalid or expired token'}, status=status.HTTP_401_UNAUTHORIZED)
 
             admintoken.delete()  # Remove token to logout
-            return Response({'message': 'Logout successful'}, status=status.HTTP_200_OK)
+            return Response({'status': 1,'message': 'Logout successful'}, status=status.HTTP_200_OK)
 
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -176,10 +180,10 @@ class AdminResetPasswordView(APIView):
         confirm_password = request.data.get('confirm_password')
 
         if not all([email, otp, password, confirm_password]):
-            return Response({'message': 'All fields are required'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'status': 0,'error': 'All fields are required'}, status=status.HTTP_400_BAD_REQUEST)
 
         if password != confirm_password:
-            return Response({'message': 'Passwords do not match'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'status': 0,'error': 'Passwords do not match'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             admin = Admin.objects.get(email=email)
@@ -205,20 +209,20 @@ class AdminDashboardView(APIView):
         admin_id = request.data.get('admin_id')
 
         if not token_key or not admin_id:
-            return Response({'error': 'AdminToken and Admin ID are required'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'status': 0,'error': 'AdminToken and Admin ID are required'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             token = AdminToken.objects.get(admintoken=token_key)
 
             if token.expires_at < datetime.utcnow():
-                return Response({'error': 'Token has expired'}, status=status.HTTP_401_UNAUTHORIZED)
+                return Response({'status': 0,'error': 'Token has expired'}, status=status.HTTP_401_UNAUTHORIZED)
 
             admin = token.admin
             if str(admin.id) != admin_id:
-                return Response({'error': 'Admin ID does not match token'}, status=status.HTTP_403_FORBIDDEN)
+                return Response({'status': 0,'error': 'Admin ID does not match token'}, status=status.HTTP_403_FORBIDDEN)
 
             if not admin.is_active:
-                return Response({'error': 'Unauthorized access'}, status=status.HTTP_403_FORBIDDEN)
+                return Response({'status': 0,'error': 'Unauthorized access'}, status=status.HTTP_403_FORBIDDEN)
 
             # Feedback
             feedbacks = Feedback.objects.only('user', 'type', 'title', 'description', 'status', 'created_at').order_by('-created_at')
@@ -272,6 +276,7 @@ class AdminDashboardView(APIView):
                     continue
 
             return Response({
+                'status': 1,
                 'admin_id': str(admin.id),
                 'feedbacks': feedback_data,
                 'performance_analytics': performance,
@@ -280,6 +285,6 @@ class AdminDashboardView(APIView):
             }, status=status.HTTP_200_OK)
 
         except DoesNotExist:
-            return Response({'error': 'Invalid token'}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response({'status': 0,'error': 'Invalid token'}, status=status.HTTP_401_UNAUTHORIZED)
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'status': 0,'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
