@@ -72,8 +72,8 @@ class UserLoginView(APIView):
             user = User.objects.get(email=email)
 
             # ✅ Check if user is verified
-            if not user.is_verified:
-                return Response({'success':0,'error': 'Email not verified. Please verify to continue'}, status=status.HTTP_403_FORBIDDEN)
+            # if not user.is_verified:
+            #     return Response({'success':0,'error': 'Email not verified. Please verify to continue'}, status=status.HTTP_403_FORBIDDEN)
 
             if not user.check_password(password):
                 return Response({'success':0,'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
