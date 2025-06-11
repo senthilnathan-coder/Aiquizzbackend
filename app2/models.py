@@ -58,6 +58,14 @@ class User(Document):
 
     def verify_otp(self, otp):
         return self.reset_otp == otp and self.otp_expiry and datetime.utcnow() <= self.otp_expiry
+    # def update_user(self,data:dict,profile_image=None):
+    #     updatable_fields=['fullname','phone_number','profile']
+    #     for fields in updatable_fields:
+    #         if fields in data:
+    #             setattr(self,fields,data[fields])
+    #     if profile_image:
+    #         self.profile['image_url']=profile_image
+    #     self.save()
 
 
 class UserToken(Document):

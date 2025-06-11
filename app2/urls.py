@@ -10,5 +10,6 @@ urlpatterns=[
     path('user/feedback/<str:pk>/',FeedbackView.as_view(),name='feedback'),
     path('user/forgotpassword/',ForgotPasswordView.as_view(),name='forgotpassword'),
     path('user/resetpassword/',ResetPasswordView.as_view(),name='resetpassword'),
+    # path('user/update/<str:pk>/',UserUpdateView.as_view(),name='user_update')
     
 ]

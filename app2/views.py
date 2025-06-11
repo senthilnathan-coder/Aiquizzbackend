@@ -7,6 +7,7 @@ from rest_framework import status
 from django.core.mail import send_mail
 from django.conf import settings
 from mongoengine.errors import DoesNotExist, ValidationError
+from django.core.files.storage import default_storage
 
 # Create your views here.
 class UserSignupView(APIView):
@@ -16,7 +17,7 @@ class UserSignupView(APIView):
 
         if not serializer.is_valid():
             errors = {k: (v[0] if isinstance(v, list) else v) for k, v in serializer.errors.items()}
-            return Response({'message': errors}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'success':0,'message': errors}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             user = serializer.save()
@@ -25,8 +26,10 @@ class UserSignupView(APIView):
             user.save()
 
             return Response({
+                'success':1,
                 'message': 'User registered successfully. Verification OTP sent to your email.',
-                'user_id': str(user.id)
+                'user_id': str(user.id),
+                
             }, status=status.HTTP_201_CREATED)
 
         except ValidationError as e:
@@ -39,7 +42,7 @@ class VerifyEmailOTPView(APIView):
         otp = request.data.get('otp')
 
         if not otp:
-            return Response({'error': 'OTP is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'success':0,'error': 'OTP is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             user = User.objects.filter(reset_otp=otp, is_verified=False).first()
@@ -52,28 +55,28 @@ class VerifyEmailOTPView(APIView):
                 user.reset_otp = None
                 user.otp_expiry = None
                 user.save()
-                return Response({'message': 'Email verified successfully.'}, status=status.HTTP_200_OK)
+                return Response({'success':1,'message': 'Email verified successfully.'}, status=status.HTTP_200_OK)
 
-            return Response({'error': 'Invalid or expired OTP.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'success':0,'error': 'Invalid or expired OTP.'}, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
-            return Response({'error': f'Internal server error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'success':0,'error': f'Internal server error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class UserLoginView(APIView):
     def post(self, request):
         email = request.data.get('email')
         password = request.data.get('password')
         if not email or not password:
-            return Response({'error': 'Email and password are required'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'success':0,'error': 'Email and password are required'}, status=status.HTTP_400_BAD_REQUEST)
         try:
             user = User.objects.get(email=email)
 
             # ✅ Check if user is verified
             if not user.is_verified:
-                return Response({'error': 'Email not verified. Please verify to continue'}, status=status.HTTP_403_FORBIDDEN)
+                return Response({'success':0,'error': 'Email not verified. Please verify to continue'}, status=status.HTTP_403_FORBIDDEN)
 
             if not user.check_password(password):
-                return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+                return Response({'success':0,'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
 
             user.last_login = datetime.utcnow()
             user.save()
@@ -83,47 +86,48 @@ class UserLoginView(APIView):
             token = UserToken.generate_token(user)
 
             return Response({
+                'success':1,
                 'message': 'Login successful',
                 'user_id': str(user.id),
                 'token': token.token
             }, status=status.HTTP_200_OK)
 
         except User.DoesNotExist:
-            return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response({'success':0,'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'success':0,'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 class UserLogoutView(APIView):
     def post(self, request):
         token_str = request.data.get('token')
         if not token_str:
-            return Response({'error': 'Token is required'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'success':0,'error': 'Token is required'}, status=status.HTTP_400_BAD_REQUEST)
         try:
             token = UserToken.objects.get(token=token_str)
             token.delete()
-            return Response({'message': 'Logged out successfully'}, status=status.HTTP_200_OK)
+            return Response({'success':1,'message': 'Logged out successfully'}, status=status.HTTP_200_OK)
         except UserToken.DoesNotExist:
-            return Response({'error': 'Invalid token'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'success':0,'error': 'Invalid token'}, status=status.HTTP_400_BAD_REQUEST)
 
 class FeedbackView(APIView):
     def post(self, request, pk):
         try:
             user = User.objects.only('id').get(pk=pk)
         except User.DoesNotExist:
-            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'success':0,'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
         serializer = FeedbackSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save(user=user)
-            return Response({'message': 'Feedback submitted successfully'}, status=status.HTTP_201_CREATED)
+            return Response({'success':1,'message': 'Feedback submitted successfully'}, status=status.HTTP_201_CREATED)
         else:
             formatted_errors = {k: (v[0] if isinstance(v, list) else v) for k, v in serializer.errors.items()}
-            return Response({'message': formatted_errors}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'success':0,'message': formatted_errors}, status=status.HTTP_400_BAD_REQUEST)
 
 class ForgotPasswordView(APIView):
     def post(self, request):
         email = request.data.get('email')
         if not email:
-            return Response({'error': 'Email is required'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'success':0,'error': 'Email is required'}, status=status.HTTP_400_BAD_REQUEST)
         try:
             user = User.objects.get(email=email)
             otp = user.generate_otp()
@@ -134,11 +138,11 @@ class ForgotPasswordView(APIView):
                 recipient_list=[email],
                 fail_silently=False,
             )
-            return Response({'message': 'OTP sent to email'}, status=status.HTTP_200_OK)
+            return Response({'success':1,'message': 'OTP sent to email'}, status=status.HTTP_200_OK)
         except User.DoesNotExist:
-            return Response({'message': 'User not found'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'success':0,'message': 'User not found'}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-            return Response({'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'success':0,'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class ResetPasswordView(APIView):
     def post(self, request):
@@ -185,16 +189,16 @@ class UserDashboardView(APIView):
         user_id = request.data.get('user_id')
 
         if not token_key or not user_id:
-            return Response({'error': 'Token and user_id are required'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'success':0,'error': 'Token and user_id are required'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             token = UserToken.objects.get(token=token_key)
             if token.expires_at < datetime.utcnow():
-                return Response({'error': 'Token has expired'}, status=status.HTTP_401_UNAUTHORIZED)
+                return Response({'success':0,'error': 'Token has expired'}, status=status.HTTP_401_UNAUTHORIZED)
 
             user = token.user
             if str(user.id) != str(user_id):
-                return Response({'error': 'Token does not match user_id'}, status=status.HTTP_403_FORBIDDEN)
+                return Response({'success':0,'error': 'Token does not match user_id'}, status=status.HTTP_403_FORBIDDEN)
 
             attempts = QuizAttempt.objects(user=user).order_by('-created_at').only('score', 'number_question', 'topics', 'created_at', 'difficulty', 'question_type')
             saved_quizzes = Quiz.objects(user=user).order_by('-created_at').only('title', 'created_at')
@@ -246,6 +250,7 @@ class UserDashboardView(APIView):
             feedback_history = FeedbackSerializer(feedbacks, many=True).data
 
             return Response({
+                'success':1,
                 'user_id': str(user.id),
                 'full_name': user.full_name,
                 'email': user.email,
@@ -268,7 +273,32 @@ class UserDashboardView(APIView):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
    
+# class UserUpdateView(APIView):
+#     def post(self, request, pk):
+#         try:
+#             user = User.objects.get(id=pk)
+#             data = request.data.dict()
+#             profile_image = request.FILES.get('profile_image')
 
+#             image_url = None
+#             if profile_image:
+#                 # Save image and get path
+#                 filename = f"profile_images/{user.id}_{profile_image.name}"
+#                 path = default_storage.save(filename, profile_image)
+#                 image_url = default_storage.url(path)  # Get accessible URL
+
+#             user.update_user(data, profile_image=image_url)
+
+#             return Response({
+#                 'message': 'User profile updated successfully',
+#                 'user_id': str(user.id),
+#                 'profile': user.profile
+#             }, status=status.HTTP_200_OK)
+
+#         except User.DoesNotExist:
+#             return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+#         except Exception as e:
+#             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
   
                 
       
