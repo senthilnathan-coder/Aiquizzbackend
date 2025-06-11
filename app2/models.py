@@ -17,7 +17,7 @@ class User(Document):
     email = EmailField(required=True, unique=True)
     password_hash = StringField(required=True)
     is_active = BooleanField(default=True)
-    is_verified = BooleanField(default=True)
+    is_verified = BooleanField(default=False)
     reset_otp = StringField()
     otp_expiry = DateTimeField()
     created_at = DateTimeField(default=datetime.utcnow)

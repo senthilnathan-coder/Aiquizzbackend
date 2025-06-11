@@ -42,7 +42,7 @@ class VerifyEmailOTPView(APIView):
             return Response({'error': 'OTP is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            user = User.objects.filter(reset_otp=otp, is_verified=True).first()
+            user = User.objects.filter(reset_otp=otp, is_verified=False).first()
 
             if not user:
                 return Response({'error': 'Invalid or expired OTP.'}, status=status.HTTP_400_BAD_REQUEST)
