@@ -9,7 +9,7 @@ import uuid
 import hashlib
 
 DEFAULT_EMAIL_OTP="123456"
-DEFAULT_OTP_EXPIRY_MINUTES=10
+# DEFAULT_OTP_EXPIRY_MINUTES=10
 # Create your models here.
 class User(Document):
     full_name = StringField(required=True, min_length=2, max_length=100)
@@ -19,11 +19,11 @@ class User(Document):
     is_active = BooleanField(default=True)
     is_verified = BooleanField(default=False)
     reset_otp = StringField()
-    otp_expiry = DateTimeField()
+    # otp_expiry = DateTimeField()
     created_at = DateTimeField(default=datetime.utcnow)
     last_login = DateTimeField(default=datetime.utcnow)
     last_quiz_created_at = DateTimeField(default=datetime(2000, 1, 1))
-    # profile =DictField(default=dict)
+    profile =DictField(default=dict)
 
     meta = {
         'collection': 'users',
@@ -57,15 +57,17 @@ class User(Document):
     #     return otp
 
     def verify_otp(self, otp):
-        return self.reset_otp == otp and self.otp_expiry and datetime.utcnow() <= self.otp_expiry
-    # def update_user(self,data:dict,profile_image=None):
-    #     updatable_fields=['fullname','phone_number','profile']
-    #     for fields in updatable_fields:
-    #         if fields in data:
-    #             setattr(self,fields,data[fields])
-    #     if profile_image:
-    #         self.profile['image_url']=profile_image
-    #     self.save()
+        return self.reset_otp == otp 
+    def update_user(self,data:dict,profile_image=None):
+        updatable_fields=['full_name','phone_number']
+        for fields in updatable_fields:
+            if fields in data:
+                setattr(self,fields,data[fields])
+        if profile_image:
+            if not self.profile:
+                self.profile = {}
+            self.profile['image_url'] = profile_image
+        self.save()
 
 
 class UserToken(Document):

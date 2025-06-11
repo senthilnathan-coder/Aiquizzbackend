@@ -22,7 +22,7 @@ class UserSignupView(APIView):
         try:
             user = serializer.save()
             user.reset_otp = DEFAULT_EMAIL_OTP
-            user.otp_expiry = datetime.utcnow() + timedelta(minutes=DEFAULT_OTP_EXPIRY_MINUTES)
+            # user.otp_expiry = datetime.utcnow() + timedelta(minutes=DEFAULT_OTP_EXPIRY_MINUTES)
             user.save()
 
             return Response({
@@ -42,7 +42,7 @@ class VerifyEmailOTPView(APIView):
         otp = request.data.get('otp')
 
         if not otp:
-            return Response({'success':0,'error': 'OTP is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'OTP is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             user = User.objects.filter(reset_otp=otp, is_verified=False).first()
@@ -53,11 +53,11 @@ class VerifyEmailOTPView(APIView):
             if user.verify_otp(otp):
                 user.is_verified = True
                 user.reset_otp = None
-                user.otp_expiry = None
+                # user.otp_expiry = None
                 user.save()
                 return Response({'success':1,'message': 'Email verified successfully.'}, status=status.HTTP_200_OK)
 
-            return Response({'success':0,'error': 'Invalid or expired OTP.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'Invalid or expired OTP.'}, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
             return Response({'success':0,'error': f'Internal server error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -273,32 +273,30 @@ class UserDashboardView(APIView):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
    
-# class UserUpdateView(APIView):
-#     def post(self, request, pk):
-#         try:
-#             user = User.objects.get(id=pk)
-#             data = request.data.dict()
-#             profile_image = request.FILES.get('profile_image')
+class UserUpdateView(APIView):
+     def post(self, request, pk):
+        try:
+            user = User.objects.get(id=pk)
+            data = request.data.copy()
+            profile_image = request.FILES.get('profile_image')
 
-#             image_url = None
-#             if profile_image:
-#                 # Save image and get path
-#                 filename = f"profile_images/{user.id}_{profile_image.name}"
-#                 path = default_storage.save(filename, profile_image)
-#                 image_url = default_storage.url(path)  # Get accessible URL
+            image_url = None
+            if profile_image:
+                filename = f"profile_images/{user.id}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{profile_image.name}"
+                path = default_storage.save(filename, profile_image)
+                image_url = default_storage.url(path)
 
-#             user.update_user(data, profile_image=image_url)
+            user.update_user(data, profile_image=image_url)
 
-#             return Response({
-#                 'message': 'User profile updated successfully',
-#                 'user_id': str(user.id),
-#                 'profile': user.profile
-#             }, status=status.HTTP_200_OK)
+            return Response({
+                'message': 'User profile updated successfully',
+                'user_id': str(user.id)
+            }, status=status.HTTP_200_OK)
 
-#         except User.DoesNotExist:
-#             return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-#         except Exception as e:
-#             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except User.DoesNotExist:
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
   
                 
       
