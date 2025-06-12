@@ -39,16 +39,17 @@ class UserSignupView(APIView):
         
 class VerifyEmailOTPView(APIView):
      def post(self, request):
+        email=request.data.get('email')
         otp = request.data.get('otp')
 
         if not otp:
-            return Response({'status': 0, 'error': 'OTP is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'status': 0, 'error': 'Email and OTP is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             if otp != DEFAULT_EMAIL_OTP:
                 return Response({'status': 0, 'error': 'Invalid OTP.'}, status=status.HTTP_400_BAD_REQUEST)
 
-            user = User.objects.filter(reset_otp=DEFAULT_EMAIL_OTP, is_verified=False).first()
+            user = User.objects.filter(email=email,reset_otp=DEFAULT_EMAIL_OTP, is_verified=False).first()
 
             if not user:
                 return Response({'status': 0, 'error': 'No unverified user found for this OTP.'}, status=status.HTTP_404_NOT_FOUND)
@@ -300,7 +301,16 @@ class UserUpdateView(APIView):
             return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-  
-                
-      
+
+class DeleteUserView(APIView):
+    def post(self,request,pk):
+       try:
+            user=User.objects.get(pk=pk)
+            if not user:
+                return Response({'status':0,'error':'user not found'})
+            user.delete()
+            return Response({'status':1,'message':'user deleted'})
+       except Exception as e:
+           return Response({'error':str(e)},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
         

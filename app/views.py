@@ -180,6 +180,19 @@ class MultimodalQuizView(APIView):
                         break
             
             data, files = request.data, request.FILES
+            # max_size = 5 * 1024 * 1024  # 5MB
+
+            # if audio := files.get('audio'):
+            #     if not audio.name.endswith('.mp3'):
+            #         return Response({'error': 'Only .mp3 files allowed for audio'}, status=400)
+            #     if audio.size > max_size:
+            #         return Response({'error': 'Audio file too large (max 5MB)'}, status=400)
+
+            # if video := files.get('video'):
+            #     if not video.name.endswith('.mp4'):
+            #         return Response({'error': 'Only .mp4 files allowed for video'}, status=400)
+            #     if video.size > max_size:
+            #         return Response({'error': 'Video file too large (max 5MB)'}, status=400)
             content_text = data.get('text', '').strip()
             url = data.get('url')
             difficulty = data.get('difficulty', 'medium')
