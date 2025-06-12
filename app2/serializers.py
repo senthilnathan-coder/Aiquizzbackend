@@ -15,7 +15,7 @@ class UserSerializer(DocumentSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'full_name', 'phone_number', 'email', 'password', 'confirm_password']
+        fields = ['id', 'full_name', 'phone_number', 'email', 'password', 'confirm_password','reset_otp']
         read_only_fields = ['id', 'is_active', 'is_verified', 'created_at', 'last_login', 'last_quiz_created_at']
 
     def validate(self, data):

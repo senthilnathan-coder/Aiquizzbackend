@@ -38,9 +38,9 @@ class UserSignupView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)     
         
 class VerifyEmailOTPView(APIView):
-     def post(self, request):
-        email=request.data.get('email')
+     def post(self, request,pk):
         otp = request.data.get('otp')
+        
 
         if not otp:
             return Response({'status': 0, 'error': 'Email and OTP is required.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -49,7 +49,7 @@ class VerifyEmailOTPView(APIView):
             if otp != DEFAULT_EMAIL_OTP:
                 return Response({'status': 0, 'error': 'Invalid OTP.'}, status=status.HTTP_400_BAD_REQUEST)
 
-            user = User.objects.filter(email=email,reset_otp=DEFAULT_EMAIL_OTP, is_verified=False).first()
+            user = User.objects.filter(pk=pk,reset_otp=DEFAULT_EMAIL_OTP, is_verified=False).first()
 
             if not user:
                 return Response({'status': 0, 'error': 'No unverified user found for this OTP.'}, status=status.HTTP_404_NOT_FOUND)
@@ -57,7 +57,7 @@ class VerifyEmailOTPView(APIView):
             # ✅ Verify user
             user.is_verified = True
             user.reset_otp = None
-            user.otp_expiry = None  # Optional: you can remove this line if not using expiry
+            user.otp_expiry = None 
             user.save()
 
             return Response({'status': 1, 'message': 'Email verified successfully.'}, status=status.HTTP_200_OK)
