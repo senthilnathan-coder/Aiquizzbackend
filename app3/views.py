@@ -63,7 +63,7 @@ class AdminsignupView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
 class VerifyAdminOTPView(APIView):
-    def post(self, request):
+    def post(self, request,pk):
         otp = request.data.get('otp')
 
         if not otp:
@@ -72,7 +72,7 @@ class VerifyAdminOTPView(APIView):
         try:
             if otp != DEFAULT_EMAIL_OTP:
                 return Response({'status': 0, 'error': 'Invalid OTP.'}, status=status.HTTP_400_BAD_REQUEST)
-            admin = Admin.objects(reset_otp=DEFAULT_EMAIL_OTP, is_verified=False).first()
+            admin = Admin.objects(pk=pk,reset_otp=DEFAULT_EMAIL_OTP, is_verified=False).first()
             if not admin:
                 return Response({'status': 0,'error': 'Admin not found'}, status=status.HTTP_404_NOT_FOUND)
 

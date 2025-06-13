@@ -91,6 +91,7 @@ class UserLoginView(APIView):
             return Response({
                 'status':1,
                 'message': 'Login successful',
+                'full_name':user.full_name,
                 'user_id': str(user.id),
                 'token': token.token
             }, status=status.HTTP_200_OK)

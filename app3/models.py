@@ -12,7 +12,8 @@ class Admin(Document):
     email = EmailField(required=True)
     password_hash = StringField(required=True)  # Changed from password to password_hash
     is_active = BooleanField(default=True)
-    reset_otp=StringField()
+    # role=StringField(required=True,choices=['admin'])
+    # reset_otp=StringField()
     # otp_expiry=DateTimeField()
     is_verified=BooleanField(default=False)
     created_at = DateTimeField(default=datetime.utcnow)

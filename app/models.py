@@ -10,7 +10,7 @@ class Quiz(Document):
     questions = ListField(DictField(), required=True)
     number_question = IntField(required=True)
     difficulty = StringField(required=True, choices=['easy', 'medium', 'hard'])
-    question_type = StringField(required=True, choices=['mcq', 'true_false'])
+    question_type = StringField(required=True, choices=['mcq', 'true_false','both'])
     created_at = DateTimeField(default=datetime.utcnow)
     content_type = ListField(StringField(choices=[
         'text', 'image', 'audio', 'video', 'url',

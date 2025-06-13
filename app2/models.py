@@ -22,7 +22,7 @@ class User(Document):
     # otp_expiry = DateTimeField()
     created_at = DateTimeField(default=datetime.utcnow)
     last_login = DateTimeField(default=datetime.utcnow)
-    last_quiz_created_at = DateTimeField(default=datetime(2000, 1, 1))
+    last_quiz_created_at = DateTimeField(default=datetime.utcnow)
     profile =DictField(default=dict)
 
     meta = {

@@ -80,8 +80,7 @@ def extract_ppt_text(path):
 def extract_excel_text(path):
     wb = load_workbook(path, read_only=True)
     return '\n'.join(str(cell.value) for sheet in wb.worksheets for row in sheet.iter_rows() for cell in row if cell.value)
-
-def parse_questions(response_text, question_type='mcq'):
+def parse_questions(response_text, question_type='both', limit=25):
     questions, topic = [], 'general'
     try:
         lines = response_text.strip().splitlines()
@@ -89,48 +88,79 @@ def parse_questions(response_text, question_type='mcq'):
             if line.lower().startswith('topic:'):
                 topic = line.split(':', 1)[1].strip()
                 break
-        for block in response_text.strip().split("Q")[1:]:
+
+        blocks = response_text.strip().split("Q")[1:]
+
+        for block in blocks:
+            if len(questions) >= limit:
+                break  # ✅ Enforce the question count limit
+
             lines = [l.strip() for l in block.strip().splitlines() if l.strip()]
-            if not lines: continue
+            if not lines:
+                continue
+
             q_text = lines[0].split(':', 1)[1].strip() if ':' in lines[0] else lines[0]
             answer_line = next((l for l in lines if l.lower().startswith(('answer:', 'ans:', 'a:'))), None)
-            if question_type == 'mcq':
-                options = [l[2:].strip() for l in lines[1:] if l.lower().startswith(('a.', 'b.', 'c.', 'd.'))]
-                if len(options) == 4 and answer_line:
-                    idx = ord(answer_line.split(':')[1].strip().upper()[0]) - ord('A')
-                    if 0 <= idx < 4:
-                        questions.append({'question': q_text, 'options': options, 'answer': options[idx], 'topic': topic})
-            elif question_type == 'true_false' and answer_line:
+            options = [l[2:].strip() for l in lines[1:] if l.lower().startswith(('a.', 'b.', 'c.', 'd.'))]
+            # MCQ
+            if len(options) == 4 and answer_line:
+                idx_char = answer_line.split(':')[1].strip().upper()[0]
+                idx = ord(idx_char) - ord('A')
+                if 0 <= idx < 4 and question_type in ['mcq', 'both']:
+                    questions.append({
+                        'question': q_text,
+                        'options': options,
+                        'answer': options[idx],
+                        'topic': topic,
+                        'type': 'mcq'
+                    })
+                    continue
+            # True/False
+            if answer_line:
                 a_text = answer_line.split(':')[1].strip().lower()
-                idx = 0 if a_text in ['true', 't', 'a'] else 1 if a_text in ['false', 'f', 'b'] else -1
-                if idx in [0, 1]:
-                    questions.append({'question': q_text, 'options': ['True', 'False'], 'answer': ['True', 'False'][idx], 'topic': topic})
+                if a_text in ['true', 't', 'a'] and question_type in ['true_false', 'both']:
+                    questions.append({
+                        'question': q_text,
+                        'options': ['True', 'False'],
+                        'answer': 'True',
+                        'topic': topic,
+                        'type': 'true_false'
+                    })
+                elif a_text in ['false', 'f', 'b'] and question_type in ['true_false', 'both']:
+                    questions.append({
+                        'question': q_text,
+                        'options': ['True', 'False'],
+                        'answer': 'False',
+                        'topic': topic,
+                        'type': 'true_false'
+                    })
     except Exception as e:
         print(f"Error parsing questions: {str(e)}")
-    return questions
+    return questions[:limit]
+ # ✅ Return only up to limit
 
 class MockPaymentView(APIView):
     def post(self, request):
-        token = request.data.get('token')
-        user_id = request.data.get('user_id')
-        amount = int(request.data.get('amount', 0))
-
-        if amount % 50 != 0:
-            return Response({'error': 'Invalid amount. Must be in multiples of ₹50.'}, status=status.HTTP_400_BAD_REQUEST)
-
         try:
-            token_obj = UserToken.objects.get(token=token, user=user_id)
-            user = token_obj.user
+            token = request.data.get('token')
+            user_id = request.data.get('user_id')
+            amount = int(request.data.get('amount', 0))
 
-            payment = UserPayment(user=user, amount=amount, is_paid=True, payment_at=datetime.utcnow())
+            if not token or not user_id or amount % 50 != 0:
+                return Response({'error': 'Invalid input. Provide valid token, user_id and amount in ₹50 multiples.'}, status=400)
+
+            token_obj = UserToken.objects.get(token=token, user=user_id)
+            payment = UserPayment(user=token_obj.user, amount=amount, is_paid=True, payment_at=datetime.utcnow())
             payment.save()
 
-            return Response({'message': f'Payment of ₹{amount} received. You have {amount // 50} quiz credits.'}, status=status.HTTP_200_OK)
+            return Response({
+                'message': f'Payment of ₹{amount} received. You have {amount // 50} quiz credits.'
+            }, status=200)
 
         except UserToken.DoesNotExist:
-            return Response({'error': 'Invalid token'}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response({'error': 'Invalid token'}, status=401)
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': str(e)}, status=500)
 
 class MultimodalQuizView(APIView):
     def get(self, request, pk):
@@ -157,6 +187,7 @@ class MultimodalQuizView(APIView):
             user = token.user
             if not user.is_verified:
                 return Response({'message':'user is not verified'},status=status.HTTP_400_BAD_REQUEST)
+
             total_quiz_count = Quiz.objects(user=user).only('id').count()
             free_limit = 10
 
@@ -166,9 +197,7 @@ class MultimodalQuizView(APIView):
                 used_credits = sum((u.used_count for u in PaidQuizUsage.objects(user=user, payment__in=paid_payments).only('used_count')))
 
                 if used_credits >= total_credits:
-                    return Response({
-                        'error': 'Payment required.you have used free limits',
-                    }, status=status.HTTP_402_PAYMENT_REQUIRED)
+                    return Response({'error': 'Payment required. You have used free limits'}, status=status.HTTP_402_PAYMENT_REQUIRED)
 
                 for payment in paid_payments:
                     usage = PaidQuizUsage.objects(user=user, payment=payment).first()
@@ -178,37 +207,56 @@ class MultimodalQuizView(APIView):
                         usage.used_count += 1
                         usage.save()
                         break
-            
+
             data, files = request.data, request.FILES
-            # max_size = 5 * 1024 * 1024  # 5MB
-
-            # if audio := files.get('audio'):
-            #     if not audio.name.endswith('.mp3'):
-            #         return Response({'error': 'Only .mp3 files allowed for audio'}, status=400)
-            #     if audio.size > max_size:
-            #         return Response({'error': 'Audio file too large (max 5MB)'}, status=400)
-
-            # if video := files.get('video'):
-            #     if not video.name.endswith('.mp4'):
-            #         return Response({'error': 'Only .mp4 files allowed for video'}, status=400)
-            #     if video.size > max_size:
-            #         return Response({'error': 'Video file too large (max 5MB)'}, status=400)
             content_text = data.get('text', '').strip()
             url = data.get('url')
             difficulty = data.get('difficulty', 'medium')
-            question_type = data.get('question_type', 'mcq')
+            question_type = data.get('question_type', 'both')
             number_question = int(data.get('number_question', 10))
+
             if not (1 <= number_question <= 25):
                 return Response({'error': 'number_question must be between 1 to 25'}, status=400)
 
             if not any([content_text, *files.values(), url]):
                 return Response({'error': 'No input content'}, status=status.HTTP_400_BAD_REQUEST)
 
-            prompt = f"You're an AI quiz generator. {difficulty.capitalize()} level. Identify main topic. Generate {number_question} {'MCQs' if question_type == 'mcq' else 'True/False'} questions."
-            prompt += "\nFormat:\nTopic: <topic>\n\nQ: <question>\nA. <option>\n...\nAnswer: <correct>\n\nText: " + content_text
+            prompt_base = (
+                f"You are an AI quiz generator. Your task is to generate exactly {number_question} quiz questions "
+                f"based on the content provided. The difficulty level should be '{difficulty}'.\n\n"
+                "Rules you must follow:\n"
+                f"1. You MUST generate exactly {number_question} questions. No more, no less.\n"
+                "2. Number each question clearly as Q1, Q2, ..., Q{number_question}.\n"
+                "3. Do not include explanations, just questions, options, and answers.\n"
+                "4. Use the exact format as shown below.\n"
+            )
+
+            if question_type == "mcq":
+                prompt_base += (
+                    "All questions must be Multiple Choice Questions (MCQs).\n"
+                    "Format:\n"
+                    "Topic: <topic>\n"
+                    "Q1: <question text>\nA. <option>\nB. <option>\nC. <option>\nD. <option>\nAnswer: <correct option letter>\n...\n"
+                )
+            elif question_type == "true_false":
+                prompt_base += (
+                    "All questions must be True or False.\n"
+                    "Format:\n"
+                    "Topic: <topic>\n"
+                    "Q1: <question text>\nAnswer: True/False\n...\n"
+                )
+            else:
+                prompt_base += (
+                    "Mix both MCQ and True/False questions.\n"
+                    "Format:\n"
+                    "Topic: <topic>\n"
+                    "MCQ:\nQ1: <question>\nA. <option>\nB. <option>\nC. <option>\nD. <option>\nAnswer: <correct option letter>\n"
+                    "True/False:\nQ2: <question>\nAnswer: True/False\n...\n"
+                )
+
+            prompt = prompt_base + f"\n\nText: {content_text}\n"
             parts = [{"text": prompt}]
 
-            # Extract additional content
             for label, field, extractor in [
                 ("audio", 'audio', transcribe_audio),
                 ("pdf", 'pdf', extract_pdf_text),
@@ -237,9 +285,12 @@ class MultimodalQuizView(APIView):
                 parts.append({"inline_data": {"mime_type": mime, "data": base64.b64encode(frame).decode()}})
 
             response = genai.GenerativeModel("models/gemini-1.5-flash").generate_content(parts)
-            questions = parse_questions(response.text, question_type)
-            if not questions:
-                return Response({'message': 'No questions generated'}, status=400)
+            questions = parse_questions(response.text, question_type, limit=number_question)
+
+            if not questions or len(questions) < number_question:
+                return Response({
+                    'error': f'Only {len(questions)} out of {number_question} questions were generated. Try different content or lower difficulty.'
+                }, status=400)
 
             topic = questions[0].get('topic', 'general')
             quiz_data = {
@@ -252,6 +303,7 @@ class MultimodalQuizView(APIView):
                 'content_type': [k for k in ['text', 'image', 'audio', 'video', 'pdf', 'word', 'ppt', 'excel', 'url'] if data.get(k) or files.get(k)],
                 'topics': [topic]
             }
+
             serializer = QuizSerializer(data=quiz_data)
             if serializer.is_valid():
                 quiz = serializer.save()
@@ -268,6 +320,7 @@ class MultimodalQuizView(APIView):
 
         except Exception as e:
             return Response({'error': str(e)}, status=500)
+
 
 
 class SubmitQuizView(APIView):
@@ -331,4 +384,3 @@ class SubmitQuizView(APIView):
             return Response({'error': 'Quiz not found'}, status=404)
         except Exception as e:
             return Response({'error': str(e)}, status=500)
-
