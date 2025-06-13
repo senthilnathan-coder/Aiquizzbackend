@@ -6,10 +6,6 @@ from rest_framework import serializers
 from email_validator import validate_email as email_validator_func, EmailNotValidError
 
 class UserSerializer(DocumentSerializer):
-    """
-    Serializer for creating a new User (signup).
-    FIXED: Ensures 'password_hash' is present before model instantiation.
-    """
     password = serializers.CharField(write_only=True, min_length=8)
     confirm_password = serializers.CharField(write_only=True)
 
@@ -19,7 +15,6 @@ class UserSerializer(DocumentSerializer):
         read_only_fields = ['id', 'is_active', 'is_verified', 'created_at', 'last_login', 'last_quiz_created_at']
 
     def validate(self, data):
-        # Already doing this validation, which is good.
         if data['password'] != data['confirm_password']:
             raise serializers.ValidationError({"confirm_password": "Passwords do not match."})
         return data
@@ -39,22 +34,10 @@ class UserSerializer(DocumentSerializer):
 
     def create(self, validated_data):
         password = validated_data.pop('password')
-        # We need confirm_password for validation here too, though it's already done in validate()
         confirm_password = validated_data.pop('confirm_password') 
 
-        # --- THE FIX IS HERE ---
-        # 1. Generate the password hash first.
-        # 2. Add it to validated_data before creating the User instance.
         validated_data['password_hash'] = generate_password_hash(password)
-        
-        # 3. Instantiate the User model. Now password_hash is guaranteed to be present.
         user = User(**validated_data)
-        
-        # No need to call user.set_password here for hashing, as it's already done.
-        # If set_password has other important side effects besides hashing, you might
-        # call it, but ensure it doesn't try to re-hash. For this model,
-        # it mostly generates the hash, so this direct approach is better.
-
         user.save() # This will now succeed as password_hash is not None
         return user
 

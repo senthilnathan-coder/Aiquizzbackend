@@ -15,6 +15,7 @@ import mammoth
 from app.models import *
 from app2.models import *
 from app.serializers import *
+from payments.models import *
 import google.generativeai as genai
 
 genai.configure(api_key=settings.GEMINI_API_KEY)
@@ -187,26 +188,32 @@ class MultimodalQuizView(APIView):
             user = token.user
             if not user.is_verified:
                 return Response({'message':'user is not verified'},status=status.HTTP_400_BAD_REQUEST)
+            
+            subscriptions = UserSubscription.objects(user=user, is_active=True)
+            if not subscriptions or not any(s.is_valid() for s in subscriptions):
+              total_quizzes = Quiz.objects(user=user).count()
+            if total_quizzes >= 10:
+                return Response({'error': 'Free trial ended. Subscribe to continue.'}, status=402)
 
-            total_quiz_count = Quiz.objects(user=user).only('id').count()
-            free_limit = 10
+            # total_quiz_count = Quiz.objects(user=user).only('id').count()
+            # free_limit = 10
 
-            if total_quiz_count >= free_limit:
-                paid_payments = UserPayment.objects(user=user, is_paid=True).order_by('payment_at')
-                total_credits = sum(p.quiz_credits for p in paid_payments)
-                used_credits = sum((u.used_count for u in PaidQuizUsage.objects(user=user, payment__in=paid_payments).only('used_count')))
+            # if total_quiz_count >= free_limit:
+            #     paid_payments = UserPayment.objects(user=user, is_paid=True).order_by('payment_at')
+            #     total_credits = sum(p.quiz_credits for p in paid_payments)
+            #     used_credits = sum((u.used_count for u in PaidQuizUsage.objects(user=user, payment__in=paid_payments).only('used_count')))
 
-                if used_credits >= total_credits:
-                    return Response({'error': 'Payment required. You have used free limits'}, status=status.HTTP_402_PAYMENT_REQUIRED)
+            #     if used_credits >= total_credits:
+            #         return Response({'error': 'Payment required. You have used free limits'}, status=status.HTTP_402_PAYMENT_REQUIRED)
 
-                for payment in paid_payments:
-                    usage = PaidQuizUsage.objects(user=user, payment=payment).first()
-                    if not usage:
-                        usage = PaidQuizUsage(user=user, payment=payment, used_count=0)
-                    if usage.used_count < payment.quiz_credits:
-                        usage.used_count += 1
-                        usage.save()
-                        break
+            #     for payment in paid_payments:
+            #         usage = PaidQuizUsage.objects(user=user, payment=payment).first()
+            #         if not usage:
+            #             usage = PaidQuizUsage(user=user, payment=payment, used_count=0)
+            #         if usage.used_count < payment.quiz_credits:
+            #             usage.used_count += 1
+            #             usage.save()
+            #             break
 
             data, files = request.data, request.FILES
             content_text = data.get('text', '').strip()
@@ -346,11 +353,16 @@ class SubmitQuizView(APIView):
                 if selected is not None and 0 <= selected < len(opts):
                     chosen = opts[selected]
                     is_correct = chosen == correct
-                    if is_correct: score += 1; correct_count += 1
+                    if is_correct:
+                        score += 1
+                        correct_count += 1
                     evaluated_questions.append({
-                        'question_id': qid, 'question': q.get('question'),
-                        'options': opts, 'correct_answer': correct,
-                        'selected_answer': chosen, 'is_correct': is_correct
+                        'question_id': qid,
+                        'question': q.get('question'),
+                        'options': opts,
+                        'correct_answer': correct,
+                        'selected_answer': chosen,
+                        'is_correct': is_correct
                     })
                     answer_texts.append(chosen)
 
@@ -365,11 +377,15 @@ class SubmitQuizView(APIView):
                 'question_type': quiz.question_type,
                 'topics': quiz.topics
             }
+
             serializer = QuizAttemptSerializer(data=attempt_data)
             if serializer.is_valid():
                 attempt = serializer.save()
             else:
-                return Response({'message': 'Invalid attempt data'}, status=400)
+                return Response({
+                    'message': 'Invalid attempt data',
+                    'errors': serializer.errors
+                }, status=400)
 
             return Response({
                 'message': 'Quiz submitted',
@@ -378,9 +394,11 @@ class SubmitQuizView(APIView):
                 'correct_answers': correct_count,
                 'quiz_attempt_id': str(attempt.id)
             })
+
         except User.DoesNotExist:
             return Response({'error': 'User not found'}, status=404)
         except Quiz.DoesNotExist:
             return Response({'error': 'Quiz not found'}, status=404)
         except Exception as e:
             return Response({'error': str(e)}, status=500)
+

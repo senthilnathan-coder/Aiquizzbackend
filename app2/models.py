@@ -15,7 +15,7 @@ class User(Document):
     full_name = StringField(required=True, min_length=2, max_length=100)
     phone_number = StringField(required=True, unique=True)
     email = EmailField(required=True, unique=True)
-    password_hash = StringField(required=True)
+    password_hash= StringField(required=True)
     is_active = BooleanField(default=True)
     is_verified = BooleanField(default=False)
     reset_otp = StringField()
