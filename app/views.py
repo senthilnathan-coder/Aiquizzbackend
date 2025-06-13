@@ -333,42 +333,51 @@ class MultimodalQuizView(APIView):
 class SubmitQuizView(APIView):
     def post(self, request, pk):
         try:
-            user = User.objects.get(id=pk)
+            user = User.objects.get(id=ObjectId(pk))
             quiz_id = request.data.get('quiz_id')
-            user_answers = request.data.get('user_answers')
+            user_answers = request.data.get('user_answers')  # e.g., {"0": "True", "1": "False"}
 
             if not quiz_id or not user_answers:
-                return Response({'error': 'Missing quiz_id or answers'}, status=400)
+                return Response({'error': 'Missing quiz_id or user_answers'}, status=400)
 
-            quiz = Quiz.objects.get(id=quiz_id)
-            score, correct_count = 0, 0
-            evaluated_questions, answer_texts = [], []
+            quiz = Quiz.objects.get(id=ObjectId(quiz_id))
 
-            for q in quiz.questions:
-                qid = str(q.get('_id'))
-                correct = q.get('answer')
-                opts = q.get('options', [])
-                selected = user_answers.get(qid)
+            score = 0
+            correct_count = 0
+            evaluated_questions = []
+            answer_texts = []
 
-                if selected is not None and 0 <= selected < len(opts):
-                    chosen = opts[selected]
-                    is_correct = chosen == correct
+            for idx, question in enumerate(quiz.questions):
+                key = str(idx)  # Ensure index is used as string
+                selected_answer = user_answers.get(key)
+
+                correct_answer = question.get('answer')
+                options = question.get('options', [])
+                question_text = question.get('question')
+
+                is_correct = False
+                if selected_answer is not None:
+                    is_correct = selected_answer == correct_answer
                     if is_correct:
                         score += 1
                         correct_count += 1
+
                     evaluated_questions.append({
-                        'question_id': qid,
-                        'question': q.get('question'),
-                        'options': opts,
-                        'correct_answer': correct,
-                        'selected_answer': chosen,
+                        'question_id': key,
+                        'question': question_text,
+                        'options': options,
+                        'correct_answer': correct_answer,
+                        'selected_answer': selected_answer,
                         'is_correct': is_correct
                     })
-                    answer_texts.append(chosen)
+                    answer_texts.append(selected_answer)
+
+            if not evaluated_questions:
+                return Response({'error': 'No questions evaluated'}, status=400)
 
             attempt_data = {
-                'user': str(user.id),
-                'quiz': str(quiz.id),
+                'user': user.id,
+                'quiz': quiz.id,
                 'questions': evaluated_questions,
                 'number_question': len(quiz.questions),
                 'user_answers': answer_texts,
@@ -381,19 +390,18 @@ class SubmitQuizView(APIView):
             serializer = QuizAttemptSerializer(data=attempt_data)
             if serializer.is_valid():
                 attempt = serializer.save()
+                return Response({
+                    'message': 'Quiz submitted',
+                    'score': score,
+                    'total_questions': len(quiz.questions),
+                    'correct_answers': correct_count,
+                    'quiz_attempt_id': str(attempt.id)
+                })
             else:
                 return Response({
                     'message': 'Invalid attempt data',
                     'errors': serializer.errors
                 }, status=400)
-
-            return Response({
-                'message': 'Quiz submitted',
-                'score': score,
-                'total_questions': len(quiz.questions),
-                'correct_answers': correct_count,
-                'quiz_attempt_id': str(attempt.id)
-            })
 
         except User.DoesNotExist:
             return Response({'error': 'User not found'}, status=404)

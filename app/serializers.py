@@ -23,13 +23,4 @@ class QuizAttemptSerializer(DocumentSerializer):
             'user_answers', 'score', 'difficulty', 'question_type', 'topics'
         ]
 
-    def to_internal_value(self, data):
-        data = data.copy()
-        try:
-            if isinstance(data.get('user'), str):
-                data['user'] = User.objects.get(id=ObjectId(data['user']))
-            if isinstance(data.get('quiz'), str):
-                data['quiz'] = Quiz.objects.get(id=ObjectId(data['quiz']))
-        except Exception as e:
-            raise ValidationError({'error': str(e)})
-        return super().to_internal_value(data)
+    
