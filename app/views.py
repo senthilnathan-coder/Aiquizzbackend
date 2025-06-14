@@ -376,8 +376,8 @@ class SubmitQuizView(APIView):
                 return Response({'error': 'No questions evaluated'}, status=400)
 
             attempt_data = {
-                'user': user,
-                'quiz': quiz,
+                'user': str(user.id),
+                'quiz': str(quiz.id),
                 'questions': evaluated_questions,
                 'number_question': len(quiz.questions),
                 'user_answers': answer_texts,
