@@ -12,11 +12,11 @@ from django.conf import settings
 class CreateSubscriptionPlanView(APIView):
     def post(self, request):
         plans = [
-            {"name": "trial", "price": 0, "duration_days": 0},
-            {"name": "basic", "price": 499, "duration_days": 30},
-            {"name": "standard", "price": 1199, "duration_days": 90},
-            {"name": "premium", "price": 2199, "duration_days": 180},
-            {"name": "enterprise", "price": 4199, "duration_days": 365},
+            {"name": "TRIAL", "price": 0.00, "duration_days": 1},
+            {"name": "BASIC", "price": 499.00, "duration_days": 30},
+            {"name": "STANDARD", "price": 1199.00, "duration_days": 90},
+            {"name": "PREMIUM", "price": 2199.00, "duration_days": 180},
+            {"name": "ENTERPRISE", "price": 4199.00, "duration_days": 365},
         ]
         created = []
         for plan in plans:
@@ -29,7 +29,17 @@ class CreateSubscriptionPlanView(APIView):
                     "duration_days": created_plan.duration_days
                 })
         return Response({"message": "Plans created", "plans": created})
-    
+
+class ListSubscriptionPlansView(APIView):
+    def get(self, request):
+        plans = SubscriptionPlan.objects.all()
+        data = [{
+            'id': str(plan.id),
+            'name': plan.name,
+            'price': float(plan.price),
+            'duration_days': plan.duration_days
+        } for plan in plans]
+        return Response({'message':'plan_detail','plans':data})
 class CreateSubscriptionOrderView(APIView):
     def post(self, request):
         user_id = request.data.get('user_id')
@@ -91,7 +101,7 @@ class VerifySubscriptionPaymentView(APIView):
             subscription.is_active = True
             subscription.save()
 
-            return Response({'message': 'Subscription activated successfully'})
+            return Response({'message': 'Subscription activated successfully','subscribtion_user':subscription.user,'subscribtion_user':subscription.plan})
 
         except UserSubscription.DoesNotExist:
             return Response({'error': 'Subscription not found'}, status=404)

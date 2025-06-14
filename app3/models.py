@@ -1,3 +1,4 @@
+
 from django.db import models
 # Create your models here.
 from mongoengine import *
@@ -13,7 +14,7 @@ class Admin(Document):
     password_hash = StringField(required=True)  # Changed from password to password_hash
     is_active = BooleanField(default=True)
     # role=StringField(required=True,choices=['admin'])
-    # reset_otp=StringField()
+    reset_otp=StringField()
     # otp_expiry=DateTimeField()
     is_verified=BooleanField(default=False)
     created_at = DateTimeField(default=datetime.utcnow)

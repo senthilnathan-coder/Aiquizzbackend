@@ -194,21 +194,23 @@ class UserDashboardView(APIView):
         user_id = request.data.get('user_id')
 
         if not token_key or not user_id:
-            return Response({'status':0,'error': 'Token and user_id are required'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'status': 0, 'error': 'Token and user_id are required'}, status=400)
 
         try:
             token = UserToken.objects.get(token=token_key)
+
             if token.expires_at < datetime.utcnow():
-                return Response({'status':0,'error': 'Token has expired'}, status=status.HTTP_401_UNAUTHORIZED)
+                return Response({'status': 0, 'error': 'Token has expired'}, status=401)
 
             user = token.user
             if str(user.id) != str(user_id):
-                return Response({'status':0,'error': 'Token does not match user_id'}, status=status.HTTP_403_FORBIDDEN)
+                return Response({'status': 0, 'error': 'Token does not match user_id'}, status=403)
 
-            attempts = QuizAttempt.objects(user=user).order_by('-created_at').only('score', 'number_question', 'topics', 'created_at', 'difficulty', 'question_type')
-            saved_quizzes = Quiz.objects(user=user).order_by('-created_at').only('title', 'created_at')
+            # Fetch quiz attempts and saved quizzes
+            attempts = QuizAttempt.objects(user=user).order_by('-created_at')
+            saved_quizzes = Quiz.objects(user=user).order_by('-created_at')
 
-            # Leaderboard calculation (cache to dict)
+            # Leaderboard calculation
             user_scores = {}
             for attempt in QuizAttempt.objects.only('user', 'score'):
                 uid = str(attempt.user.id)
@@ -236,13 +238,13 @@ class UserDashboardView(APIView):
                     topic_errors[topic] = topic_errors.get(topic, 0) + incorrect
             weak_topics = sorted(topic_errors.items(), key=lambda x: x[1], reverse=True)[:5]
 
-            # Performance graph (date: total score)
+            # Performance graph
             performance_graph = {}
             for attempt in attempts:
                 date_key = attempt.created_at.strftime('%Y-%m-%d')
                 performance_graph[date_key] = performance_graph.get(date_key, 0) + attempt.score
 
-            # Difficulty and question type stats
+            # Attempt statistics
             difficulty_stats = {'easy': 0, 'medium': 0, 'hard': 0}
             question_type_stats = {'mcq': 0, 'true_false': 0}
             for attempt in attempts:
@@ -251,18 +253,19 @@ class UserDashboardView(APIView):
                 if attempt.question_type in question_type_stats:
                     question_type_stats[attempt.question_type] += 1
 
+            # Feedback history
             feedbacks = Feedback.objects(user=user).order_by('-created_at')
             feedback_history = FeedbackSerializer(feedbacks, many=True).data
 
             return Response({
-                'status':1,
+                'status': 1,
                 'user_id': str(user.id),
                 'full_name': user.full_name,
                 'email': user.email,
                 'quiz_streak_days': streak,
                 'weak_topics': [topic for topic, _ in weak_topics],
                 'leaderboard_rank': user_rank,
-                'total_attempts': len(attempts),
+                'total_attempts': attempts.count(),
                 'saved_quizzes': QuizSerializer(saved_quizzes, many=True).data,
                 'attempt_history': QuizAttemptSerializer(attempts, many=True).data,
                 'performance_graph': performance_graph,
@@ -271,12 +274,12 @@ class UserDashboardView(APIView):
                     'by_question_type': question_type_stats
                 },
                 'feedback_history': feedback_history,
-            }, status=status.HTTP_200_OK)
+            }, status=200)
 
         except UserToken.DoesNotExist:
-            return Response({'error': 'Invalid token'}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response({'status': 0, 'error': 'Invalid token'}, status=401)
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'status': 0, 'error': str(e)}, status=500)
    
 class UserUpdateView(APIView):
      def post(self, request, pk):

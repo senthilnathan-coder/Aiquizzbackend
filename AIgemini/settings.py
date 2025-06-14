@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'app',
     'app2',
     'app3',
+    'payments',
     'rest_framework',
     
 ]
@@ -56,7 +57,7 @@ INSTALLED_APPS = [
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:5174",
-    "https://6842b5d00c029a9a1950199b--digiaiquestt.netlify.app",
+    "https://684c54947f6b3f3de3e3bdb8--digiaiquestt.netlify.app",
 ]
 
 

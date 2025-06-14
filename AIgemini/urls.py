@@ -23,5 +23,6 @@ urlpatterns = [
     # path('admin/', admin.site.urls),
     path('app/',include('app.urls')),
     path('app2/',include('app2.urls')),
-    path('app3/',include('app3.urls'))
+    path('app3/',include('app3.urls')),
+    path('payments/',include('payments.urls'))
 ]

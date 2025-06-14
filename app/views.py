@@ -189,11 +189,11 @@ class MultimodalQuizView(APIView):
             if not user.is_verified:
                 return Response({'message':'user is not verified'},status=status.HTTP_400_BAD_REQUEST)
             
-            subscriptions = UserSubscription.objects(user=user, is_active=True)
-            if not subscriptions or not any(s.is_valid() for s in subscriptions):
-              total_quizzes = Quiz.objects(user=user).count()
-            if total_quizzes >= 10:
-                return Response({'error': 'Free trial ended. Subscribe to continue.'}, status=402)
+            # subscriptions = UserSubscription.objects(user=user, is_active=True)
+            # if not subscriptions or not any(s.is_valid() for s in subscriptions):
+            #   total_quizzes = Quiz.objects(user=user).count()
+            # if total_quizzes >= 10:
+            #     return Response({'error': 'Free trial ended. Subscribe to continue.'}, status=402)
 
             # total_quiz_count = Quiz.objects(user=user).only('id').count()
             # free_limit = 10
@@ -376,8 +376,8 @@ class SubmitQuizView(APIView):
                 return Response({'error': 'No questions evaluated'}, status=400)
 
             attempt_data = {
-                'user': user.id,
-                'quiz': quiz.id,
+                'user': user,
+                'quiz': quiz,
                 'questions': evaluated_questions,
                 'number_question': len(quiz.questions),
                 'user_answers': answer_texts,
@@ -395,7 +395,9 @@ class SubmitQuizView(APIView):
                     'score': score,
                     'total_questions': len(quiz.questions),
                     'correct_answers': correct_count,
-                    'quiz_attempt_id': str(attempt.id)
+                    'quiz_attempt_id': str(attempt.id),
+
+                    
                 })
             else:
                 return Response({
@@ -409,4 +411,3 @@ class SubmitQuizView(APIView):
             return Response({'error': 'Quiz not found'}, status=404)
         except Exception as e:
             return Response({'error': str(e)}, status=500)
-
