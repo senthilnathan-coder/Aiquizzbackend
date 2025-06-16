@@ -140,28 +140,28 @@ def parse_questions(response_text, question_type='both', limit=25):
     return questions[:limit]
  # ✅ Return only up to limit
 
-class MockPaymentView(APIView):
-    def post(self, request):
-        try:
-            token = request.data.get('token')
-            user_id = request.data.get('user_id')
-            amount = int(request.data.get('amount', 0))
+# class MockPaymentView(APIView):
+#     def post(self, request):
+#         try:
+#             token = request.data.get('token')
+#             user_id = request.data.get('user_id')
+#             amount = int(request.data.get('amount', 0))
 
-            if not token or not user_id or amount % 50 != 0:
-                return Response({'error': 'Invalid input. Provide valid token, user_id and amount in ₹50 multiples.'}, status=400)
+#             if not token or not user_id or amount % 50 != 0:
+#                 return Response({'error': 'Invalid input. Provide valid token, user_id and amount in ₹50 multiples.'}, status=400)
 
-            token_obj = UserToken.objects.get(token=token, user=user_id)
-            payment = UserPayment(user=token_obj.user, amount=amount, is_paid=True, payment_at=datetime.utcnow())
-            payment.save()
+#             token_obj = UserToken.objects.get(token=token, user=user_id)
+#             payment = UserPayment(user=token_obj.user, amount=amount, is_paid=True, payment_at=datetime.utcnow())
+#             payment.save()
 
-            return Response({
-                'message': f'Payment of ₹{amount} received. You have {amount // 50} quiz credits.'
-            }, status=200)
+#             return Response({
+#                 'message': f'Payment of ₹{amount} received. You have {amount // 50} quiz credits.'
+#             }, status=200)
 
-        except UserToken.DoesNotExist:
-            return Response({'error': 'Invalid token'}, status=401)
-        except Exception as e:
-            return Response({'error': str(e)}, status=500)
+#         except UserToken.DoesNotExist:
+#             return Response({'error': 'Invalid token'}, status=401)
+#         except Exception as e:
+#             return Response({'error': str(e)}, status=500)
 
 class MultimodalQuizView(APIView):
     def get(self, request, pk):
@@ -177,18 +177,20 @@ class MultimodalQuizView(APIView):
             return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
     def post(self, request, pk):
+        token_key = request.data.get('token')
+
+        if not token_key:
+            return Response({'status': 0, 'error': 'Token is required'}, status=400)
+
         try:
-            token_key = request.data.get('token')
-            if not token_key:
-                return Response({'message': 'Token required'}, status=status.HTTP_400_BAD_REQUEST)
-            token = UserToken.objects.get(token=token_key, user=pk)
+            token = AuthToken.objects.get(token=token_key, user=pk)
             if token.expires_at < datetime.utcnow():
                 return Response({'error': 'Token expired'}, status=status.HTTP_401_UNAUTHORIZED)
 
             user = token.user
-            if not user.is_verified:
-                return Response({'message':'user is not verified'},status=status.HTTP_400_BAD_REQUEST)
-            
+            if user.role != 'user':
+                return Response({'status': 0, 'error': 'Access denied: not a user'}, status=403)
+
             # subscriptions = UserSubscription.objects(user=user, is_active=True)
             # if not subscriptions or not any(s.is_valid() for s in subscriptions):
             #   total_quizzes = Quiz.objects(user=user).count()
