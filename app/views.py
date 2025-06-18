@@ -65,7 +65,7 @@ def extract_frame(video_file):
     return image_data, "image/jpeg"
 
 def transcribe_audio(path):
-    segments, _ = whisper_model.transcribe(path, beam_size=5, language=None)
+    segments, _ = whisper_model.transcribe(path, beam_size=1, language=None)
     return ' '.join(s.text.strip() for s in segments if s.text.strip())
 
 def extract_pdf_text(path):
@@ -138,30 +138,7 @@ def parse_questions(response_text, question_type='both', limit=25):
     except Exception as e:
         print(f"Error parsing questions: {str(e)}")
     return questions[:limit]
- # ✅ Return only up to limit
 
-# class MockPaymentView(APIView):
-#     def post(self, request):
-#         try:
-#             token = request.data.get('token')
-#             user_id = request.data.get('user_id')
-#             amount = int(request.data.get('amount', 0))
-
-#             if not token or not user_id or amount % 50 != 0:
-#                 return Response({'error': 'Invalid input. Provide valid token, user_id and amount in ₹50 multiples.'}, status=400)
-
-#             token_obj = UserToken.objects.get(token=token, user=user_id)
-#             payment = UserPayment(user=token_obj.user, amount=amount, is_paid=True, payment_at=datetime.utcnow())
-#             payment.save()
-
-#             return Response({
-#                 'message': f'Payment of ₹{amount} received. You have {amount // 50} quiz credits.'
-#             }, status=200)
-
-#         except UserToken.DoesNotExist:
-#             return Response({'error': 'Invalid token'}, status=401)
-#         except Exception as e:
-#             return Response({'error': str(e)}, status=500)
 
 class MultimodalQuizView(APIView):
     def get(self, request, pk):
@@ -178,7 +155,6 @@ class MultimodalQuizView(APIView):
 
     def post(self, request, pk):
         token_key = request.data.get('token')
-
         if not token_key:
             return Response({'status': 0, 'error': 'Token is required'}, status=400)
 
@@ -190,32 +166,6 @@ class MultimodalQuizView(APIView):
             user = token.user
             if user.role != 'user':
                 return Response({'status': 0, 'error': 'Access denied: not a user'}, status=403)
-
-            # subscriptions = UserSubscription.objects(user=user, is_active=True)
-            # if not subscriptions or not any(s.is_valid() for s in subscriptions):
-            #   total_quizzes = Quiz.objects(user=user).count()
-            # if total_quizzes >= 10:
-            #     return Response({'error': 'Free trial ended. Subscribe to continue.'}, status=402)
-
-            # total_quiz_count = Quiz.objects(user=user).only('id').count()
-            # free_limit = 10
-
-            # if total_quiz_count >= free_limit:
-            #     paid_payments = UserPayment.objects(user=user, is_paid=True).order_by('payment_at')
-            #     total_credits = sum(p.quiz_credits for p in paid_payments)
-            #     used_credits = sum((u.used_count for u in PaidQuizUsage.objects(user=user, payment__in=paid_payments).only('used_count')))
-
-            #     if used_credits >= total_credits:
-            #         return Response({'error': 'Payment required. You have used free limits'}, status=status.HTTP_402_PAYMENT_REQUIRED)
-
-            #     for payment in paid_payments:
-            #         usage = PaidQuizUsage.objects(user=user, payment=payment).first()
-            #         if not usage:
-            #             usage = PaidQuizUsage(user=user, payment=payment, used_count=0)
-            #         if usage.used_count < payment.quiz_credits:
-            #             usage.used_count += 1
-            #             usage.save()
-            #             break
 
             data, files = request.data, request.FILES
             content_text = data.get('text', '').strip()
@@ -294,7 +244,7 @@ class MultimodalQuizView(APIView):
                 parts.append({"inline_data": {"mime_type": mime, "data": base64.b64encode(frame).decode()}})
 
             response = genai.GenerativeModel("models/gemini-1.5-flash").generate_content(parts)
-            questions = parse_questions(response.text, question_type, limit=number_question)
+            questions = parse_questions(response.text, question_type, number_question)
 
             if not questions or len(questions) < number_question:
                 return Response({
@@ -315,19 +265,24 @@ class MultimodalQuizView(APIView):
 
             serializer = QuizSerializer(data=quiz_data)
             if serializer.is_valid():
-                quiz = serializer.save()
+                validated_data = serializer.validated_data
+                validated_data['user'] = user  # Assign User instance
+                quiz = Quiz(**validated_data).save()
             else:
-                return Response({'message': 'Invalid quiz data'}, status=400)
+                return Response({'message': 'Invalid quiz data', 'errors': serializer.errors}, status=400)
 
             return Response({
                 'message': 'Quiz generated',
                 'user_id': str(user.id),
                 'quiz_id': str(quiz.id),
                 'topics': topic,
-                'questions': [{'question': q['question'], 'options': q['options'], 'answer': q['answer']} for q in questions]
+                'questions': [{'question': q['question'], 'options': q.get('options'), 'answer': q['answer']} for q in questions]
             })
 
         except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.exception("Quiz generation failed")
             return Response({'error': str(e)}, status=500)
 
 
@@ -336,80 +291,75 @@ class SubmitQuizView(APIView):
     def post(self, request, pk):
         try:
             user = User.objects.get(id=ObjectId(pk))
-            quiz_id = request.data.get('quiz_id')
-            user_answers = request.data.get('user_answers')  # e.g., {"0": "True", "1": "False"}
-
-            if not quiz_id or not user_answers:
-                return Response({'error': 'Missing quiz_id or user_answers'}, status=400)
-
-            quiz = Quiz.objects.get(id=ObjectId(quiz_id))
-
-            score = 0
-            correct_count = 0
-            evaluated_questions = []
-            answer_texts = []
-
-            for idx, question in enumerate(quiz.questions):
-                key = str(idx)  # Ensure index is used as string
-                selected_answer = user_answers.get(key)
-
-                correct_answer = question.get('answer')
-                options = question.get('options', [])
-                question_text = question.get('question')
-
-                is_correct = False
-                if selected_answer is not None:
-                    is_correct = selected_answer == correct_answer
-                    if is_correct:
-                        score += 1
-                        correct_count += 1
-
-                    evaluated_questions.append({
-                        'question_id': key,
-                        'question': question_text,
-                        'options': options,
-                        'correct_answer': correct_answer,
-                        'selected_answer': selected_answer,
-                        'is_correct': is_correct
-                    })
-                    answer_texts.append(selected_answer)
-
-            if not evaluated_questions:
-                return Response({'error': 'No questions evaluated'}, status=400)
-
-            attempt_data = {
-                'user': str(user.id),
-                'quiz': str(quiz.id),
-                'questions': evaluated_questions,
-                'number_question': len(quiz.questions),
-                'user_answers': answer_texts,
-                'score': score,
-                'difficulty': quiz.difficulty,
-                'question_type': quiz.question_type,
-                'topics': quiz.topics
-            }
-
-            serializer = QuizAttemptSerializer(data=attempt_data)
-            if serializer.is_valid():
-                attempt = serializer.save()
-                return Response({
-                    'message': 'Quiz submitted',
-                    'score': score,
-                    'total_questions': len(quiz.questions),
-                    'correct_answers': correct_count,
-                    'quiz_attempt_id': str(attempt.id),
-
-                    
-                })
-            else:
-                return Response({
-                    'message': 'Invalid attempt data',
-                    'errors': serializer.errors
-                }, status=400)
-
         except User.DoesNotExist:
-            return Response({'error': 'User not found'}, status=404)
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        quiz_id = request.data.get('quiz_id')
+        user_answers = request.data.get('user_answers')  # e.g., {"0": "A", "1": "True"}
+
+        if not quiz_id or not user_answers:
+            return Response({'error': 'Missing quiz_id or user_answers'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            quiz = Quiz.objects.get(id=ObjectId(quiz_id))
         except Quiz.DoesNotExist:
-            return Response({'error': 'Quiz not found'}, status=404)
-        except Exception as e:
-            return Response({'error': str(e)}, status=500)
+            return Response({'error': 'Quiz not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        evaluated_questions = []
+        score = 0
+        correct_count = 0
+        answer_texts = []
+
+        for idx, question in enumerate(quiz.questions):
+            key = str(idx)
+            selected_answer = user_answers.get(key)
+            correct_answer = question.get('answer')
+            options = question.get('options', [])
+            question_text = question.get('question')
+
+            if selected_answer is not None:
+                is_correct = selected_answer == correct_answer
+                if is_correct:
+                    score += 1
+                    correct_count += 1
+
+                evaluated_questions.append({
+                    'question_id': key,
+                    'question': question_text,
+                    'options': options,
+                    'correct_answer': correct_answer,
+                    'selected_answer': selected_answer,
+                    'is_correct': is_correct
+                })
+                answer_texts.append(selected_answer)
+
+        if not evaluated_questions:
+            return Response({'error': 'No questions evaluated'}, status=status.HTTP_400_BAD_REQUEST)
+
+        attempt_data = {
+            'user': str(user.id),
+            'quiz': str(quiz.id),
+            'questions': evaluated_questions,
+            'number_question': len(quiz.questions),
+            'user_answers': answer_texts,
+            'score': score,
+            'difficulty': quiz.difficulty,
+            'question_type': quiz.question_type,
+            'topics': quiz.topics
+        }
+
+        serializer = QuizAttemptSerializer(data=attempt_data)
+        if serializer.is_valid():
+            attempt = serializer.save()
+            return Response({
+                'message': 'Quiz submitted',
+                'quiz_attempt_id': str(attempt.id),
+                'score': score,
+                'total_questions': len(quiz.questions),
+                'correct_answers': correct_count
+            }, status=status.HTTP_200_OK)
+        else:
+            return Response({
+                'message': 'Invalid attempt data',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
