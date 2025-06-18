@@ -24,8 +24,8 @@ class LoginView(APIView):
             if not user.is_verified:
                 return Response({'status': 0, 'error': 'Email not verified. Please verify to continue.'}, status=status.HTTP_403_FORBIDDEN)
 
-            # if not user.check_password(password):
-            #     return Response({'status': 0, 'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+            if not user.check_password(password):
+                return Response({'status': 0, 'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
 
             user.last_login = datetime.utcnow()
             user.save()

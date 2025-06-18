@@ -7,6 +7,7 @@ from datetime import datetime,timedelta
 import random,string
 import uuid
 import hashlib
+import bcrypt
 
 class User(Document):
     full_name = StringField(required=True, min_length=2, max_length=100)
@@ -39,6 +40,15 @@ class User(Document):
         self.phone_number = ''.join(filter(str.isdigit, self.phone_number))
         if not (len(self.phone_number) == 10 and self.phone_number[0] in '6789'):
             raise ValueError("Invalid Indian phone number")
+    def set_password(self, raw_password):
+        hashed = bcrypt.hashpw(raw_password.encode('utf-8'), bcrypt.gensalt())
+        self.password = hashed.decode('utf-8')
+
+    def check_password(self, raw_password):
+        if not self.password:
+            return False
+        return bcrypt.checkpw(raw_password.encode('utf-8'), self.password.encode('utf-8'))
+    
 
 
 class AuthToken(Document):
