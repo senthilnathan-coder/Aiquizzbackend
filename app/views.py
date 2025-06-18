@@ -155,6 +155,7 @@ class MultimodalQuizView(APIView):
 
     def post(self, request, pk):
         token_key = request.data.get('token')
+
         if not token_key:
             return Response({'status': 0, 'error': 'Token is required'}, status=400)
 
@@ -166,6 +167,8 @@ class MultimodalQuizView(APIView):
             user = token.user
             if user.role != 'user':
                 return Response({'status': 0, 'error': 'Access denied: not a user'}, status=403)
+
+        
 
             data, files = request.data, request.FILES
             content_text = data.get('text', '').strip()
@@ -244,7 +247,7 @@ class MultimodalQuizView(APIView):
                 parts.append({"inline_data": {"mime_type": mime, "data": base64.b64encode(frame).decode()}})
 
             response = genai.GenerativeModel("models/gemini-1.5-flash").generate_content(parts)
-            questions = parse_questions(response.text, question_type, number_question)
+            questions = parse_questions(response.text, question_type, limit=number_question)
 
             if not questions or len(questions) < number_question:
                 return Response({
@@ -265,24 +268,20 @@ class MultimodalQuizView(APIView):
 
             serializer = QuizSerializer(data=quiz_data)
             if serializer.is_valid():
-                validated_data = serializer.validated_data
-                validated_data['user'] = user  # Assign User instance
-                quiz = Quiz(**validated_data).save()
+                quiz = serializer.save()
             else:
-                return Response({'message': 'Invalid quiz data', 'errors': serializer.errors}, status=400)
+                return Response({'message': 'Invalid quiz data'}, status=400)
+            
 
             return Response({
                 'message': 'Quiz generated',
                 'user_id': str(user.id),
                 'quiz_id': str(quiz.id),
                 'topics': topic,
-                'questions': [{'question': q['question'], 'options': q.get('options'), 'answer': q['answer']} for q in questions]
+                'questions': [{'question': q['question'], 'options': q['options'], 'answer': q['answer']} for q in questions]
             })
 
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.exception("Quiz generation failed")
             return Response({'error': str(e)}, status=500)
 
 
@@ -291,75 +290,80 @@ class SubmitQuizView(APIView):
     def post(self, request, pk):
         try:
             user = User.objects.get(id=ObjectId(pk))
-        except User.DoesNotExist:
-            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+            quiz_id = request.data.get('quiz_id')
+            user_answers = request.data.get('user_answers')  # e.g., {"0": "True", "1": "False"}
 
-        quiz_id = request.data.get('quiz_id')
-        user_answers = request.data.get('user_answers')  # e.g., {"0": "A", "1": "True"}
+            if not quiz_id or not user_answers:
+                return Response({'error': 'Missing quiz_id or user_answers'}, status=400)
 
-        if not quiz_id or not user_answers:
-            return Response({'error': 'Missing quiz_id or user_answers'}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
             quiz = Quiz.objects.get(id=ObjectId(quiz_id))
-        except Quiz.DoesNotExist:
-            return Response({'error': 'Quiz not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        evaluated_questions = []
-        score = 0
-        correct_count = 0
-        answer_texts = []
+            score = 0
+            correct_count = 0
+            evaluated_questions = []
+            answer_texts = []
 
-        for idx, question in enumerate(quiz.questions):
-            key = str(idx)
-            selected_answer = user_answers.get(key)
-            correct_answer = question.get('answer')
-            options = question.get('options', [])
-            question_text = question.get('question')
+            for idx, question in enumerate(quiz.questions):
+                key = str(idx)  # Ensure index is used as string
+                selected_answer = user_answers.get(key)
 
-            if selected_answer is not None:
-                is_correct = selected_answer == correct_answer
-                if is_correct:
-                    score += 1
-                    correct_count += 1
+                correct_answer = question.get('answer')
+                options = question.get('options', [])
+                question_text = question.get('question')
 
-                evaluated_questions.append({
-                    'question_id': key,
-                    'question': question_text,
-                    'options': options,
-                    'correct_answer': correct_answer,
-                    'selected_answer': selected_answer,
-                    'is_correct': is_correct
-                })
-                answer_texts.append(selected_answer)
+                is_correct = False
+                if selected_answer is not None:
+                    is_correct = selected_answer == correct_answer
+                    if is_correct:
+                        score += 1
+                        correct_count += 1
 
-        if not evaluated_questions:
-            return Response({'error': 'No questions evaluated'}, status=status.HTTP_400_BAD_REQUEST)
+                    evaluated_questions.append({
+                        'question_id': key,
+                        'question': question_text,
+                        'options': options,
+                        'correct_answer': correct_answer,
+                        'selected_answer': selected_answer,
+                        'is_correct': is_correct
+                    })
+                    answer_texts.append(selected_answer)
 
-        attempt_data = {
-            'user': str(user.id),
-            'quiz': str(quiz.id),
-            'questions': evaluated_questions,
-            'number_question': len(quiz.questions),
-            'user_answers': answer_texts,
-            'score': score,
-            'difficulty': quiz.difficulty,
-            'question_type': quiz.question_type,
-            'topics': quiz.topics
-        }
+            if not evaluated_questions:
+                return Response({'error': 'No questions evaluated'}, status=400)
 
-        serializer = QuizAttemptSerializer(data=attempt_data)
-        if serializer.is_valid():
-            attempt = serializer.save()
-            return Response({
-                'message': 'Quiz submitted',
-                'quiz_attempt_id': str(attempt.id),
+            attempt_data = {
+                'user': str(user.id),
+                'quiz': str(quiz.id),
+                'questions': evaluated_questions,
+                'number_question': len(quiz.questions),
+                'user_answers': answer_texts,
                 'score': score,
-                'total_questions': len(quiz.questions),
-                'correct_answers': correct_count
-            }, status=status.HTTP_200_OK)
-        else:
-            return Response({
-                'message': 'Invalid attempt data',
-                'errors': serializer.errors
-            }, status=status.HTTP_400_BAD_REQUEST)
+                'difficulty': quiz.difficulty,
+                'question_type': quiz.question_type,
+                'topics': quiz.topics
+            }
+
+            serializer = QuizAttemptSerializer(data=attempt_data)
+            if serializer.is_valid():
+                attempt = serializer.save()
+                return Response({
+                    'message': 'Quiz submitted',
+                    'score': score,
+                    'total_questions': len(quiz.questions),
+                    'correct_answers': correct_count,
+                    'quiz_attempt_id': str(attempt.id),
+
+                    
+                })
+            else:
+                return Response({
+                    'message': 'Invalid attempt data',
+                    'errors': serializer.errors
+                }, status=400)
+
+        except User.DoesNotExist:
+            return Response({'error': 'User not found'}, status=404)
+        except Quiz.DoesNotExist:
+            return Response({'error': 'Quiz not found'}, status=404)
+        except Exception as e:
+            return Response({'error': str(e)}, status=500)
