@@ -17,7 +17,7 @@ class SubscriptionPlan(Document):
     created_at = DateTimeField(default=datetime.utcnow)
 
 class UserSubscription(Document):
-    user = ReferenceField(User, required=True, unique=True)
+    user = ReferenceField(User, required=True)
     plan = ReferenceField(SubscriptionPlan, required=True)
     razorpay_order_id = StringField()
     razorpay_payment_id = StringField()

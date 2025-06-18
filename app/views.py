@@ -168,7 +168,18 @@ class MultimodalQuizView(APIView):
             if user.role != 'user':
                 return Response({'status': 0, 'error': 'Access denied: not a user'}, status=403)
 
-        
+            subscription = UserSubscription.objects(user=user.id, is_active=True).order_by('-start_date').first()
+
+            if not subscription:
+                return Response({'error': 'No active subscription found'}, status=403)
+
+            # Step 2: Check if subscription is expired
+            if subscription.end_date and subscription.end_date < datetime.utcnow():
+                subscription.is_active = False
+                subscription.save()
+                return Response({'error': 'Subscription has expired'}, status=403)
+            if subscription.remaining_credits <= 0:
+                return Response({'error': 'No remaining quiz credits'}, status=403)
 
             data, files = request.data, request.FILES
             content_text = data.get('text', '').strip()
@@ -269,6 +280,9 @@ class MultimodalQuizView(APIView):
             serializer = QuizSerializer(data=quiz_data)
             if serializer.is_valid():
                 quiz = serializer.save()
+                
+                subscription.remaining_credits -= 1
+                subscription.save()
             else:
                 return Response({'message': 'Invalid quiz data'}, status=400)
             

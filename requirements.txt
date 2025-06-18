@@ -3,6 +3,7 @@ Django==4.2.21
 djangorestframework
 django-cors-headers
 
+razorpay
 # MongoDB integration
 mongoengine>=0.27
 django-rest-framework-mongoengine @ git+https://github.com/umutbozkurt/django-rest-framework-mongoengine.git
