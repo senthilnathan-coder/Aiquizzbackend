@@ -13,11 +13,62 @@ import razorpay
 class CreateSubscriptionPlanView(APIView):
     def post(self, request):
         plans = [
-            {"name": "TRIAL", "price": 0.00, "duration_days": 1},
-            {"name": "BASIC", "price": 499.00, "duration_days": 30},
-            {"name": "STANDARD", "price": 1199.00, "duration_days": 90},
-            {"name": "PREMIUM", "price": 2199.00, "duration_days": 180},
-            {"name": "ELITE", "price": 4199.00, "duration_days": 365},
+            {
+                "name": "TRIAL",
+                "price": 0.00,
+                "duration_days": 1,
+                "features": [
+                    "3 AI quiz attempts (on login day only)",
+                    "Up to 5 questions per attempt",
+                    "Supports Text to Quiz feature only",
+                    "Access valid only on the day of login",
+                    "Designed to help new users explore basic functionality"
+                ]
+            },
+            {
+                "name": "BASIC",
+                "price": 499.00,
+                "duration_days": 30,
+                "features": [
+                    "Total of 400 credits",
+                    "Each credit allows one AI quiz attempt, with up to 40  0 total attempts included",
+                    "Supports all AI quiz features (Text, PDF, Image, Video, Audio, Word)",
+                    "Full platform access during the plan period"
+                ]
+            },
+            {
+                "name": "STANDARD",
+                "price": 1199.00,
+                "duration_days": 90,
+                "features": [
+                    "Total of 1000 credits",
+                    "Each credit allows one AI quiz attempt, with up to 1000 total attempts included",
+                    "Supports all AI quiz features (Text, PDF, Image, Video, Audio, Word)",
+                    "Full platform access throughout the subscription period"
+                ]
+            },
+            {
+                "name": "PREMIUM",
+                "price": 2199.00,
+                "duration_days": 180,
+                "features": [
+                    "Total of 2000 credits",
+                    "Each credit allows one AI quiz attempt, with up to 2000 total attempts included",
+                    "Supports all AI quiz features (Text, PDF, Image, Video, Audio, Word)",
+                    "Full access to all platform tools for 6 months" 
+                ]
+            },
+            {
+                "name": "ELITE",
+                "price": 4199.00,
+                "duration_days": 365,
+                "features": [
+                    "Total of 4000 credits",
+                    "Each credit allows one AI quiz attempt, with up to 4000 total attempts included",
+                    "Supports all AI quiz features (Text, PDF, Image, Video, Audio, Word)",
+                    "Full platform access throughout the 1-year subscription period"
+                ]
+            }
         ]
         created = []
         for plan in plans:
@@ -26,19 +77,24 @@ class CreateSubscriptionPlanView(APIView):
                 created.append({
                     "id": str(created_plan.id),
                     "name": created_plan.name,
-                    "price": created_plan.price,
-                    "duration_days": created_plan.duration_days
+                    "price": float(created_plan.price),
+                    "duration_days": created_plan.duration_days,
+                    "features": created_plan.features
                 })
-        return Response({"message": "Plans created", "plans": created})
+
+        return Response({
+            "message": "Plans created",
+            "plans":created})
 
 class ListSubscriptionPlansView(APIView):
-    def post(self, request):
+    def get(self, request):
         plans = SubscriptionPlan.objects.all()
         data = [{
             'id': str(plan.id),
             'name': plan.name,
             'price': float(plan.price),
-            'duration_days': plan.duration_days
+            'duration_days': plan.duration_days,
+            'features':plan.features
         } for plan in plans]
         return Response({'message':'plan_detail','plans':data})
 class CreateSubscriptionOrderView(APIView):

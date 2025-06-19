@@ -14,6 +14,7 @@ class SubscriptionPlan(Document):
     name = StringField(required=True, choices=PLAN_CHOICES, unique=True)
     price = DecimalField(required=True)
     duration_days = IntField(required=True)  # 0 for trial
+    features=ListField(StringField(),default=[])
     created_at = DateTimeField(default=datetime.utcnow)
 
 class UserSubscription(Document):

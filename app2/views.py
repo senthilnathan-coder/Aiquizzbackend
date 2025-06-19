@@ -89,40 +89,40 @@ class UserDashboardView(APIView):
             if user.role != 'user':
                 return Response({'status': 0, 'error': 'Access denied: not a user'}, status=403)
 
-            # --- Load all required fields ---
-            attempts = list(
-                QuizAttempt.objects(user=user.id)
-                .order_by('-created_at')
-                .limit(50)
-            )
+            attempts = QuizAttempt.objects(user=user.id).order_by('-created_at').only(
+                'user','quiz','score', 'topics', 'difficulty', 'question_type', 'created_at', 'number_question','questions','user_answers'
+            ).limit(50)
 
-            saved_quizzes = list(
-                Quiz.objects(user=user.id)
-                .order_by('-created_at')
-                .limit(10)
-            )
+            saved_quizzes = Quiz.objects(user=user.id).only(
+                'user','questions','number_question','question_type','content_type','topics','title', 'difficulty', 'created_at'
+            ).order_by('-created_at').limit(10)
 
-            # --- Rank calculation ---
             user_total_score = sum(float(a.score or 0) for a in attempts)
-            all_users = User.objects(role='user', is_verified=True).only('id')
-            user_scores = []
 
-            for u in all_users:
-                u_attempts = QuizAttempt.objects(user=u.id).only('score')
-                total = sum(float(at.score or 0) for at in u_attempts)
-                user_scores.append((str(u.id), total))
+            # Optimized leaderboard calculation
+            pipeline = [
+                {"$match": {"role": "user", "is_verified": True}},
+                {"$lookup": {
+                    "from": "quiz_attempts",
+                    "localField": "_id",
+                    "foreignField": "user",
+                    "as": "attempts"
+                }},
+                {"$project": {
+                    "_id": 1,
+                    "total_score": {"$sum": "$attempts.score"}
+                }},
+                {"$sort": {"total_score": -1}}
+            ]
+            leaderboard = list(User.objects.aggregate(*pipeline))
+            user_rank = next((i + 1 for i, u in enumerate(leaderboard) if str(u['_id']) == str(user.id)), None)
 
-            user_scores.sort(key=lambda x: x[1], reverse=True)
-
-            user_rank = next((i + 1 for i, (uid, _) in enumerate(user_scores) if uid == str(user.id)), None)
-
-            # --- Quiz streak ---
+            # Streak
             today = datetime.utcnow().date()
-            days_played = sorted({a.created_at.date() for a in attempts if a.created_at}, reverse=True)
-            streak = sum(1 for i, day in enumerate(days_played) if (today - timedelta(days=i)) == day)
+            played_dates = sorted({a.created_at.date() for a in attempts if a.created_at}, reverse=True)
+            streak = sum(1 for i, d in enumerate(played_dates) if (today - timedelta(days=i)) == d)
 
-
-            # --- Weak topics ---
+            # Weak topics
             topic_errors = {}
             for a in attempts:
                 incorrect = (a.number_question or 0) - (a.score or 0)
@@ -130,14 +130,14 @@ class UserDashboardView(APIView):
                     topic_errors[topic] = topic_errors.get(topic, 0) + incorrect
             weak_topics = sorted(topic_errors.items(), key=lambda x: x[1], reverse=True)[:5]
 
-            # --- Performance graph ---
+            # Performance graph
             performance_graph = {}
             for a in attempts:
                 if a.created_at and a.score is not None:
-                    date_key = a.created_at.strftime('%Y-%m-%d')
-                    performance_graph[date_key] = performance_graph.get(date_key, 0) + float(a.score)
+                    key = a.created_at.strftime('%Y-%m-%d')
+                    performance_graph[key] = performance_graph.get(key, 0) + float(a.score)
 
-            # --- Attempt stats ---
+            # Stats
             difficulty_stats = {'easy': 0, 'medium': 0, 'hard': 0}
             question_type_stats = {'mcq': 0, 'true_false': 0}
             for a in attempts:
