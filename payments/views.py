@@ -109,12 +109,14 @@ class CreateSubscriptionOrderView(APIView):
             return Response({'error': 'user_id and plan_id and token are required'}, status=400)
 
         try:
-            user = User.objects.get(id=user_id)
-            plan = SubscriptionPlan.objects.get(id=plan_id)
+
             token= AuthToken.objects.get(token=token)
+            user = token.user
+            plan = SubscriptionPlan.objects.get(id=plan_id)
             
             if str(token.user.id) != str(user.id):
                 return Response({'error': 'Invalid token for this user'}, status=403)
+           
             if user.role != 'user':
                 return Response({'status': 0, 'error': 'Access denied: not a user'}, status=403)
             # If TRIAL plan, activate directly
