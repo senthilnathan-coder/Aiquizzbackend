@@ -8,6 +8,7 @@ import hashlib
 import hmac
 from django.conf import settings
 import razorpay
+from app2.models import AuthToken
 
 
 class CreateSubscriptionPlanView(APIView):
@@ -98,17 +99,22 @@ class ListSubscriptionPlansView(APIView):
         } for plan in plans]
         return Response({'message':'plan_detail','plans':data})
 class CreateSubscriptionOrderView(APIView):
+  
     def post(self, request):
         user_id = request.data.get('user_id')
         plan_id = request.data.get('plan_id')
+        token=request.data.get('token')
 
-        if not user_id or not plan_id:
-            return Response({'error': 'user_id and plan_id are required'}, status=400)
+        if not user_id or not plan_id or not token:
+            return Response({'error': 'user_id and plan_id and token are required'}, status=400)
 
         try:
             user = User.objects.get(id=user_id)
             plan = SubscriptionPlan.objects.get(id=plan_id)
-
+            token= AuthToken.objects.get(token=token)
+            
+            if str(token.user.id) != str(user.id):
+                return Response({'error': 'Invalid token for this user'}, status=403)
             if user.role != 'user':
                 return Response({'status': 0, 'error': 'Access denied: not a user'}, status=403)
             # If TRIAL plan, activate directly
