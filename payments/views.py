@@ -9,7 +9,7 @@ import hmac
 from django.conf import settings
 import razorpay
 from app2.models import AuthToken
-
+from decimal import Decimal, ROUND_HALF_UP
 
 class CreateSubscriptionPlanView(APIView):
     def post(self, request):
@@ -32,7 +32,7 @@ class CreateSubscriptionPlanView(APIView):
                 "duration_days": 30,
                 "features": [
                     "Total of 400 credits",
-                    "Each credit allows one AI quiz attempt, with up to 40  0 total attempts included",
+                    "Each credit allows one AI quiz attempt",
                     "Supports all AI quiz features (Text, PDF, Image, Video, Audio, Word)",
                     "Full platform access during the plan period"
                 ]
@@ -43,7 +43,7 @@ class CreateSubscriptionPlanView(APIView):
                 "duration_days": 90,
                 "features": [
                     "Total of 1000 credits",
-                    "Each credit allows one AI quiz attempt, with up to 1000 total attempts included",
+                    "Each credit allows one AI quiz attempt",
                     "Supports all AI quiz features (Text, PDF, Image, Video, Audio, Word)",
                     "Full platform access throughout the subscription period"
                 ]
@@ -54,9 +54,9 @@ class CreateSubscriptionPlanView(APIView):
                 "duration_days": 180,
                 "features": [
                     "Total of 2000 credits",
-                    "Each credit allows one AI quiz attempt, with up to 2000 total attempts included",
+                    "Each credit allows one AI quiz attempt",
                     "Supports all AI quiz features (Text, PDF, Image, Video, Audio, Word)",
-                    "Full access to all platform tools for 6 months" 
+                    "Full access to all platform tools for 6 months"
                 ]
             },
             {
@@ -65,27 +65,45 @@ class CreateSubscriptionPlanView(APIView):
                 "duration_days": 365,
                 "features": [
                     "Total of 4000 credits",
-                    "Each credit allows one AI quiz attempt, with up to 4000 total attempts included",
+                    "Each credit allows one AI quiz attempt",
                     "Supports all AI quiz features (Text, PDF, Image, Video, Audio, Word)",
                     "Full platform access throughout the 1-year subscription period"
                 ]
             }
         ]
+
         created = []
+
         for plan in plans:
+            # Avoid duplication
             if not SubscriptionPlan.objects(name=plan['name']).first():
-                created_plan = SubscriptionPlan(**plan).save()
+                created_plan = SubscriptionPlan(
+                    name=plan['name'],
+                    price=Decimal(plan['price']),
+                    duration_days=plan['duration_days'],
+                    features=plan['features']
+                ).save()
+
+                base_price = Decimal(plan['price'])
+                cgst = (base_price * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                sgst = (base_price * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                total_price = base_price + cgst + sgst
+
                 created.append({
                     "id": str(created_plan.id),
                     "name": created_plan.name,
-                    "price": float(created_plan.price),
+                    "base_price": float(base_price),
+                    "cgst": float(cgst),
+                    "sgst": float(sgst),
+                    "total_price": float(total_price),
                     "duration_days": created_plan.duration_days,
                     "features": created_plan.features
                 })
 
         return Response({
             "message": "Plans created",
-            "plans":created})
+            "plans": created
+        })
 
 class ListSubscriptionPlansView(APIView):
     def get(self, request):
@@ -108,27 +126,23 @@ class CreateSubscriptionOrderView(APIView):
             return Response({'error': 'user_id, plan_id, and token are required'}, status=400)
 
         try:
-            # ✅ Validate token
             token_obj = AuthToken.objects.get(token=token)
             user = token_obj.user
 
-            # ✅ Double-check that token belongs to correct user
             if str(user.id) != str(user_id):
                 return Response({'error': 'Token does not match user'}, status=403)
 
-            # ✅ Get plan
             plan = SubscriptionPlan.objects.get(id=plan_id)
 
             if user.role != 'user':
                 return Response({'status': 0, 'error': 'Access denied: not a user'}, status=403)
 
-            # ✅ If TRIAL plan
+            # Handle TRIAL Plan
             if plan.name.upper() == 'TRIAL':
                 existing_trial = UserSubscription.objects(user=user, plan=plan).first()
                 if existing_trial:
                     return Response({'error': 'Trial plan already used'}, status=403)
 
-                # Deactivate current
                 UserSubscription.objects(user=user, is_active=True).update(set__is_active=False)
 
                 start = datetime.utcnow()
@@ -150,18 +164,24 @@ class CreateSubscriptionOrderView(APIView):
                     'credits': credits,
                     'valid_till': end.isoformat()
                 })
+            # Calculate CGST, SGST, Total Amount
+            base_price = Decimal(plan.price)
+            cgst = (base_price * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            sgst = (base_price * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            total_price = base_price + cgst + sgst
 
-            # ✅ Paid Plan – Create Razorpay Order
+            # Razorpay expects amount in paise
+            amount_in_paise = int(total_price * 100)
+
             client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
             razorpay_order = client.order.create({
-                "amount": int(plan.price * 100),  # in paise
+                "amount": amount_in_paise,
                 "currency": "INR",
                 "payment_capture": 1
             })
 
-            # Deactivate existing subscriptions
+            # Save the subscription (inactive until payment verified)
             UserSubscription.objects(user=user, is_active=True).update(set__is_active=False)
-
             subscription = UserSubscription.objects.create(
                 user=user,
                 plan=plan,
@@ -172,7 +192,13 @@ class CreateSubscriptionOrderView(APIView):
             return Response({
                 "message": "Order created",
                 "order_id": razorpay_order['id'],
-                "amount": float(plan.price),
+                "amount_breakup": {
+                    "base_price": float(base_price),
+                    "cgst": float(cgst),
+                    "sgst": float(sgst),
+                    "total": float(total_price)
+                },
+                "amount_paise": amount_in_paise,
                 "key_id": settings.RAZORPAY_KEY_ID,
                 "plan_name": plan.name,
                 "subscription_id": str(subscription.id)

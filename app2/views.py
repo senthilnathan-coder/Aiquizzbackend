@@ -9,6 +9,7 @@ from django.conf import settings
 from mongoengine.errors import DoesNotExist, ValidationError
 from django.core.files.storage import default_storage
 import time
+from payments.models import *
 
 class LoginView(APIView):
     def post(self, request):
@@ -67,6 +68,7 @@ class FeedbackView(APIView):
             return Response({'status':0,'message': formatted_errors}, status=status.HTTP_400_BAD_REQUEST)
 
 
+
 class UserDashboardView(APIView):
     def post(self, request):
         token_key = request.data.get('token')
@@ -76,7 +78,7 @@ class UserDashboardView(APIView):
             return Response({'status': 0, 'error': 'Token and user_id are required'}, status=400)
 
         try:
-            token = AuthToken.objects.get(token=token_key)
+            token = AuthToken.objects.only('token', 'user', 'expires_at').get(token=token_key)
 
             if token.expires_at < datetime.utcnow():
                 return Response({'status': 0, 'error': 'Token has expired'}, status=401)
@@ -89,40 +91,27 @@ class UserDashboardView(APIView):
             if user.role != 'user':
                 return Response({'status': 0, 'error': 'Access denied: not a user'}, status=403)
 
-            attempts = QuizAttempt.objects(user=user.id).order_by('-created_at').only(
-                'user','quiz','score', 'topics', 'difficulty', 'question_type', 'created_at', 'number_question','questions','user_answers'
-            ).limit(50)
+            active_subscription = UserSubscription.objects(user=user, is_active=True).only('plan', 'remaining_credits', 'end_date').first()
+            subscription_info = {
+                "plan": active_subscription.plan.name if active_subscription else None,
+                "credits": active_subscription.remaining_credits if active_subscription else 0,
+                "valid_till": active_subscription.end_date.isoformat() if active_subscription and active_subscription.end_date else None
+            }
 
-            saved_quizzes = Quiz.objects(user=user.id).only(
-                'user','questions','number_question','question_type','content_type','topics','title', 'difficulty', 'created_at'
-            ).order_by('-created_at').limit(10)
+            attempts = list(QuizAttempt.objects(user=user.id).only('user','quiz','questions','user_answers','score', 'topics', 'difficulty', 'question_type', 'created_at', 'number_question').order_by('-created_at').limit(50))
+            saved_quizzes = list(Quiz.objects(user=user.id).only('user','questions', 'number_question', 'question_type', 'content_type', 'topics', 'title', 'difficulty', 'created_at').order_by('-created_at').limit(10))
 
             user_total_score = sum(float(a.score or 0) for a in attempts)
 
-            # Optimized leaderboard calculation
-            pipeline = [
-                {"$match": {"role": "user", "is_verified": True}},
-                {"$lookup": {
-                    "from": "quiz_attempts",
-                    "localField": "_id",
-                    "foreignField": "user",
-                    "as": "attempts"
-                }},
-                {"$project": {
-                    "_id": 1,
-                    "total_score": {"$sum": "$attempts.score"}
-                }},
-                {"$sort": {"total_score": -1}}
-            ]
-            leaderboard = list(User.objects.aggregate(*pipeline))
-            user_rank = next((i + 1 for i, u in enumerate(leaderboard) if str(u['_id']) == str(user.id)), None)
-
-            # Streak
-            today = datetime.utcnow().date()
             played_dates = sorted({a.created_at.date() for a in attempts if a.created_at}, reverse=True)
-            streak = sum(1 for i, d in enumerate(played_dates) if (today - timedelta(days=i)) == d)
+            streak = 0
+            today = datetime.utcnow().date()
+            for i, date in enumerate(played_dates):
+                if (today - timedelta(days=i)) == date:
+                    streak += 1
+                else:
+                    break
 
-            # Weak topics
             topic_errors = {}
             for a in attempts:
                 incorrect = (a.number_question or 0) - (a.score or 0)
@@ -130,14 +119,12 @@ class UserDashboardView(APIView):
                     topic_errors[topic] = topic_errors.get(topic, 0) + incorrect
             weak_topics = sorted(topic_errors.items(), key=lambda x: x[1], reverse=True)[:5]
 
-            # Performance graph
             performance_graph = {}
             for a in attempts:
                 if a.created_at and a.score is not None:
                     key = a.created_at.strftime('%Y-%m-%d')
                     performance_graph[key] = performance_graph.get(key, 0) + float(a.score)
 
-            # Stats
             difficulty_stats = {'easy': 0, 'medium': 0, 'hard': 0}
             question_type_stats = {'mcq': 0, 'true_false': 0}
             for a in attempts:
@@ -153,16 +140,16 @@ class UserDashboardView(APIView):
                 'email': user.email,
                 'quiz_streak_days': streak,
                 'weak_topics': [t for t, _ in weak_topics],
-                'leaderboard_rank': user_rank,
                 'total_attempts': len(attempts),
+                'total_score': user_total_score,
+                'subscription': subscription_info,
                 'saved_quizzes': QuizSerializer(saved_quizzes, many=True).data,
                 'attempt_history': QuizAttemptSerializer(attempts, many=True).data,
                 'performance_graph': performance_graph,
                 'attempt_stats': {
                     'by_difficulty': difficulty_stats,
                     'by_question_type': question_type_stats
-                },
-                'total_score': user_total_score
+                }
             }, status=200)
 
         except AuthToken.DoesNotExist:
