@@ -99,34 +99,36 @@ class ListSubscriptionPlansView(APIView):
         } for plan in plans]
         return Response({'message':'plan_detail','plans':data})
 class CreateSubscriptionOrderView(APIView):
-  
     def post(self, request):
         user_id = request.data.get('user_id')
         plan_id = request.data.get('plan_id')
-        token=request.data.get('token')
+        token = request.data.get('token')
 
         if not user_id or not plan_id or not token:
-            return Response({'error': 'user_id and plan_id and token are required'}, status=400)
+            return Response({'error': 'user_id, plan_id, and token are required'}, status=400)
 
         try:
+            # ✅ Validate token
+            token_obj = AuthToken.objects.get(token=token)
+            user = token_obj.user
 
-            token= AuthToken.objects.get(token=token)
-            user = token.user
+            # ✅ Double-check that token belongs to correct user
+            if str(user.id) != str(user_id):
+                return Response({'error': 'Token does not match user'}, status=403)
+
+            # ✅ Get plan
             plan = SubscriptionPlan.objects.get(id=plan_id)
-            
-            if str(token.user.id) != str(user.id):
-                return Response({'error': 'Invalid token for this user'}, status=403)
-           
+
             if user.role != 'user':
                 return Response({'status': 0, 'error': 'Access denied: not a user'}, status=403)
-            # If TRIAL plan, activate directly
+
+            # ✅ If TRIAL plan
             if plan.name.upper() == 'TRIAL':
-                # Prevent multiple trials for the same user
                 existing_trial = UserSubscription.objects(user=user, plan=plan).first()
                 if existing_trial:
                     return Response({'error': 'Trial plan already used'}, status=403)
 
-                # Deactivate existing subscriptions
+                # Deactivate current
                 UserSubscription.objects(user=user, is_active=True).update(set__is_active=False)
 
                 start = datetime.utcnow()
@@ -149,23 +151,24 @@ class CreateSubscriptionOrderView(APIView):
                     'valid_till': end.isoformat()
                 })
 
-            # Paid plan: Create Razorpay order
+            # ✅ Paid Plan – Create Razorpay Order
             client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
             razorpay_order = client.order.create({
-                "amount": int(plan.price * 100),  # Razorpay expects amount in paise
+                "amount": int(plan.price * 100),  # in paise
                 "currency": "INR",
                 "payment_capture": 1
             })
 
-            # Save inactive subscription with Razorpay order ID
+            # Deactivate existing subscriptions
             UserSubscription.objects(user=user, is_active=True).update(set__is_active=False)
+
             subscription = UserSubscription.objects.create(
                 user=user,
                 plan=plan,
                 razorpay_order_id=razorpay_order['id'],
-                is_active=False  # Will activate after verification
+                is_active=False
             )
-           
+
             return Response({
                 "message": "Order created",
                 "order_id": razorpay_order['id'],
@@ -175,12 +178,13 @@ class CreateSubscriptionOrderView(APIView):
                 "subscription_id": str(subscription.id)
             })
 
-        except User.DoesNotExist:
-            return Response({'error': 'User not found'}, status=404)
+        except AuthToken.DoesNotExist:
+            return Response({'error': 'Invalid token'}, status=403)
         except SubscriptionPlan.DoesNotExist:
             return Response({'error': 'Plan not found'}, status=404)
         except Exception as e:
             return Response({'error': str(e)}, status=500)
+
         
 class VerifySubscriptionPaymentView(APIView):
     def post(self, request):
