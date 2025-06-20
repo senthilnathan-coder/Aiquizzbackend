@@ -108,14 +108,26 @@ class CreateSubscriptionPlanView(APIView):
 class ListSubscriptionPlansView(APIView):
     def get(self, request):
         plans = SubscriptionPlan.objects.all()
-        data = [{
-            'id': str(plan.id),
-            'name': plan.name,
-            'price': float(plan.price),
-            'duration_days': plan.duration_days,
-            'features':plan.features
-        } for plan in plans]
-        return Response({'message':'plan_detail','plans':data})
+        data = []
+
+        for plan in plans:
+            base_price = Decimal(plan.price)
+            cgst = (base_price * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            sgst = (base_price * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            total_price = base_price + cgst + sgst
+
+            data.append({
+                'id': str(plan.id),
+                'name': plan.name,
+                'duration_days': plan.duration_days,
+                'features': plan.features,
+                'base_price': float(base_price),
+                'cgst': float(cgst),
+                'sgst': float(sgst),
+                'total_price': float(total_price)
+            })
+
+        return Response({'message': 'Plan details', 'plans': data})
 class CreateSubscriptionOrderView(APIView):
     def post(self, request):
         user_id = request.data.get('user_id')
