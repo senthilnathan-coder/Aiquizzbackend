@@ -26,6 +26,9 @@ class User(Document):
     created_at = DateTimeField(default=datetime.utcnow)
     last_login = DateTimeField(default=datetime.utcnow)
     last_quiz_created_at = DateTimeField(default=None, null=True)
+     
+    country=StringField(default='india')
+    state=StringField()
     
     profile = DictField(default=dict)
 

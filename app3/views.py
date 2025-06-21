@@ -11,10 +11,10 @@ from rest_framework import status
 from datetime import datetime, timedelta
 # from .models import Admin  # Import your models
 # from .serializers import AdminSerializer  # Your serializer
-import uuid
 from django.core.mail import send_mail
 from django.conf import settings
 from app2.models import *
+from payments.models import *
 
 class AdminDashboardView(APIView):
     def post(self, request):
@@ -27,7 +27,7 @@ class AdminDashboardView(APIView):
         try:
             token = AuthToken.objects.get(token=token_key)
 
-            # Token expiry check
+            # Token checks
             if token.expires_at < datetime.utcnow():
                 return Response({'status': 0, 'error': 'Token has expired'}, status=status.HTTP_401_UNAUTHORIZED)
 
@@ -41,56 +41,72 @@ class AdminDashboardView(APIView):
             if admin.role != 'admin':
                 return Response({'status': 0, 'error': 'Access denied: Not an admin'}, status=status.HTTP_403_FORBIDDEN)
 
-            # === Feedbacks ===
-            feedback_data = []
-            for f in Feedback.objects.only('user', 'type', 'title', 'description', 'created_at').order_by('-created_at'):
-                try:
-                    feedback_data.append({
-                        'user_id': str(f.user.id),
-                        'user_name': getattr(f.user, 'full_name', ''),
-                        'type': f.type,
-                        'title': f.title,
-                        'description': f.description,
-                        'created_at': f.created_at.strftime('%Y-%m-%d %H:%M')
-                    })
-                except Exception:
-                    continue
+            # === Feedbacks === (batch load user IDs)
+            feedbacks = Feedback.objects.only('user', 'type', 'title', 'description', 'created_at').order_by('-created_at')
+            user_ids = list({str(f.user.id) for f in feedbacks})
+            users_map = {str(u.id): u.full_name for u in User.objects(id__in=user_ids).only('id', 'full_name')}
+
+            feedback_data = [{
+                'user_id': str(f.user.id),
+                'user_name': users_map.get(str(f.user.id), ''),
+                'type': f.type,
+                'title': f.title,
+                'description': f.description,
+                'created_at': f.created_at.strftime('%Y-%m-%d %H:%M')
+            } for f in feedbacks]
 
             # === Performance Analytics ===
             attempts = QuizAttempt.objects.only('score', 'difficulty')
-            total_attempts = attempts.count()
-            scores = [a.score for a in attempts if a.score is not None]
-            avg_score = round(sum(scores) / len(scores), 2) if scores else 0
-
-            # Distribution by difficulty
+            scores = []
             distribution = {}
             for a in attempts:
-                difficulty = a.difficulty or 'unknown'
-                distribution[difficulty] = distribution.get(difficulty, 0) + 1
+                if a.score is not None:
+                    scores.append(a.score)
+                key = a.difficulty or 'unknown'
+                distribution[key] = distribution.get(key, 0) + 1
 
             performance = {
-                'total_attempts': total_attempts,
-                'average_score': avg_score,
+                'total_attempts': attempts.count(),
+                'average_score': round(sum(scores) / len(scores), 2) if scores else 0,
                 'attempt_distribution': distribution
             }
 
             # === User Stats ===
-            user_data = []
             users = User.objects(role='user').only('id', 'full_name', 'email')
+            user_ids = [u.id for u in users]
+            attempt_map = {}
+            for a in QuizAttempt.objects(user__in=user_ids).only('user', 'score'):
+                uid = str(a.user.id)
+                if uid not in attempt_map:
+                    attempt_map[uid] = []
+                if a.score is not None:
+                    attempt_map[uid].append(a.score)
+
+            user_data = []
             for u in users:
-                try:
-                    u_attempts = QuizAttempt.objects(user=u.id).only('score')
-                    scores = [a.score for a in u_attempts if a.score is not None]
-                    total_score = sum(scores)
-                    user_data.append({
-                        'user_id': str(u.id),
-                        'full_name': u.full_name,
-                        'email': u.email,
-                        'total_attempts': len(scores),
-                        'total_score': total_score
-                    })
-                except Exception:
-                    continue
+                uid = str(u.id)
+                scores = attempt_map.get(uid, [])
+                user_data.append({
+                    'user_id': uid,
+                    'full_name': u.full_name,
+                    'email': u.email,
+                    'total_attempts': len(scores),
+                    'total_score': sum(scores)
+                })
+
+            # === Subscriptions ===
+            subscriptions = UserSubscription.objects.select_related()
+            user_ids = [sub.user.id for sub in subscriptions if sub.user]
+            user_map = {str(u.id): u.full_name for u in User.objects(id__in=user_ids).only('id', 'full_name')}
+
+            subscription_data = [{
+                'user_id': str(sub.user.id),
+                'full_name': user_map.get(str(sub.user.id), ''),
+                'plan_name': sub.plan.name if sub.plan else '',
+                'remaining_credits': sub.remaining_credits,
+                'valid_till': sub.end_date.strftime('%Y-%m-%d') if sub.end_date else '',
+                'payment_id': sub.razorpay_order_id or 'N/A'
+            } for sub in subscriptions if sub.user]
 
             return Response({
                 'status': 1,
@@ -98,7 +114,8 @@ class AdminDashboardView(APIView):
                 'feedbacks': feedback_data,
                 'performance_analytics': performance,
                 'user_count': users.count(),
-                'user_details': user_data
+                'user_details': user_data,
+                'subscription_data': subscription_data
             }, status=status.HTTP_200_OK)
 
         except AuthToken.DoesNotExist:

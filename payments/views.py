@@ -84,18 +84,18 @@ class CreateSubscriptionPlanView(APIView):
                     features=plan['features']
                 ).save()
 
-                base_price = Decimal(plan['price'])
-                cgst = (base_price * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                sgst = (base_price * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                total_price = base_price + cgst + sgst
+                price = Decimal(plan['price'])
+                # cgst = (base_price * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                # sgst = (base_price * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                # total_price = base_price + cgst + sgst
 
                 created.append({
                     "id": str(created_plan.id),
                     "name": created_plan.name,
-                    "base_price": float(base_price),
-                    "cgst": float(cgst),
-                    "sgst": float(sgst),
-                    "total_price": float(total_price),
+                    "price": float(price),
+                    # "cgst": float(cgst),
+                    # "sgst": float(sgst),
+                    # "total_price": float(total_price),
                     "duration_days": created_plan.duration_days,
                     "features": created_plan.features
                 })
@@ -106,28 +106,75 @@ class CreateSubscriptionPlanView(APIView):
         })
 
 class ListSubscriptionPlansView(APIView):
-    def get(self, request):
-        plans = SubscriptionPlan.objects.all()
-        data = []
+    def post(self, request):
+        token_key = request.data.get('token')
+        user_id = request.data.get('user_id')
+        
+        if not token_key or not user_id:
+            return Response({'status': 0, 'error': 'Token and user_id are required'}, status=400)
 
-        for plan in plans:
-            base_price = Decimal(plan.price)
-            cgst = (base_price * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            sgst = (base_price * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            total_price = base_price + cgst + sgst
+        try:
+            token = AuthToken.objects.get(token=token_key)
 
-            data.append({
-                'id': str(plan.id),
-                'name': plan.name,
-                'duration_days': plan.duration_days,
-                'features': plan.features,
-                'base_price': float(base_price),
-                'cgst': float(cgst),
-                'sgst': float(sgst),
-                'total_price': float(total_price)
+            if str(token.user.id) != str(user_id):
+                return Response({'status': 0, 'error': 'Token does not match user'}, status=403)
+
+            user = token.user
+            country = (user.country or '').strip().lower()
+            state = (user.state or '').strip().lower()
+
+            plans = SubscriptionPlan.objects.all()
+            data = []
+
+            for plan in plans:
+                base_price = Decimal(plan.price)
+                cgst = sgst = igst = Decimal('0.00')
+                total_price = base_price
+                tax_details = {
+                    'base_price': float(base_price)
+                }
+
+                if country == 'india':
+                    if state == 'tamil nadu':
+                        # CGST + SGST
+                        cgst = (base_price * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        sgst = (base_price * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        total_price = base_price + cgst + sgst
+
+                        tax_details['cgst'] = float(cgst)
+                        tax_details['sgst'] = float(sgst)
+                    else:
+                        # IGST
+                        igst = (base_price * Decimal('0.18')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        total_price = base_price + igst
+
+                        tax_details['igst'] = float(igst)
+
+                tax_details['total_price'] = float(total_price)
+
+                data.append({
+                    'id': str(plan.id),
+                    'name': plan.name,
+                    'duration_days': plan.duration_days,
+                    'features': plan.features,
+                    **tax_details  # Merge tax details into response
+                })
+
+            return Response({
+                'status': 1,
+                'user_id': str(user.id),
+                'country': country,
+                'state': state,
+                'plans': data
             })
 
-        return Response({'message': 'Plan details', 'plans': data})
+        except AuthToken.DoesNotExist:
+            return Response({'status': 0, 'error': 'Invalid token'}, status=401)
+        except User.DoesNotExist:
+            return Response({'status': 0, 'error': 'User not found'}, status=404)
+        except Exception as e:
+            return Response({'status': 0, 'error': str(e)}, status=500)
+
 class CreateSubscriptionOrderView(APIView):
     def post(self, request):
         user_id = request.data.get('user_id')
@@ -149,10 +196,9 @@ class CreateSubscriptionOrderView(APIView):
             if user.role != 'user':
                 return Response({'status': 0, 'error': 'Access denied: not a user'}, status=403)
 
-            # Handle TRIAL Plan
+            # === TRIAL Plan Handling ===
             if plan.name.upper() == 'TRIAL':
-                existing_trial = UserSubscription.objects(user=user, plan=plan).first()
-                if existing_trial:
+                if UserSubscription.objects(user=user, plan=plan).first():
                     return Response({'error': 'Trial plan already used'}, status=403)
 
                 UserSubscription.objects(user=user, is_active=True).update(set__is_active=False)
@@ -176,13 +222,25 @@ class CreateSubscriptionOrderView(APIView):
                     'credits': credits,
                     'valid_till': end.isoformat()
                 })
-            # Calculate CGST, SGST, Total Amount
-            base_price = Decimal(plan.price)
-            cgst = (base_price * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            sgst = (base_price * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            total_price = base_price + cgst + sgst
 
-            # Razorpay expects amount in paise
+            # === GST Calculation ===
+            base_price = Decimal(plan.price)
+            cgst = sgst = igst = Decimal('0.00')
+            country = (user.country or '').strip().lower()
+            state = (user.state or '').strip().lower()
+
+            if country == 'india':
+                if state == 'tamil nadu':
+                    cgst = (base_price * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    sgst = (base_price * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    total_price = base_price + cgst + sgst
+                else:
+                    igst = (base_price * Decimal('0.18')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    total_price = base_price + igst
+            else:
+                total_price = base_price
+
+            # === Razorpay Order Creation ===
             amount_in_paise = int(total_price * 100)
 
             client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
@@ -192,7 +250,7 @@ class CreateSubscriptionOrderView(APIView):
                 "payment_capture": 1
             })
 
-            # Save the subscription (inactive until payment verified)
+            # Save subscription as pending
             UserSubscription.objects(user=user, is_active=True).update(set__is_active=False)
             subscription = UserSubscription.objects.create(
                 user=user,
@@ -206,8 +264,8 @@ class CreateSubscriptionOrderView(APIView):
                 "order_id": razorpay_order['id'],
                 "amount_breakup": {
                     "base_price": float(base_price),
-                    "cgst": float(cgst),
-                    "sgst": float(sgst),
+                    **({"cgst": float(cgst), "sgst": float(sgst)} if cgst else {}),
+                    **({"igst": float(igst)} if igst else {}),
                     "total": float(total_price)
                 },
                 "amount_paise": amount_in_paise,

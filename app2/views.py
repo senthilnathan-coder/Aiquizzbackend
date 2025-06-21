@@ -10,6 +10,7 @@ from mongoengine.errors import DoesNotExist, ValidationError
 from django.core.files.storage import default_storage
 import time
 from payments.models import *
+from django.core.cache import cache
 
 class LoginView(APIView):
     def post(self, request):
@@ -91,49 +92,64 @@ class UserDashboardView(APIView):
             if user.role != 'user':
                 return Response({'status': 0, 'error': 'Access denied: not a user'}, status=403)
 
+            # Optional caching for speed
+            cache_key = f"user_dashboard_{user.id}"
+            cached_response = cache.get(cache_key)
+            if cached_response:
+                return Response(cached_response)
+
+            # Subscription
             active_subscription = UserSubscription.objects(user=user, is_active=True).only('plan', 'remaining_credits', 'end_date').first()
             subscription_info = {
-                "plan": active_subscription.plan.name if active_subscription else None,
+                "plan": active_subscription.plan.name if active_subscription and active_subscription.plan else None,
                 "credits": active_subscription.remaining_credits if active_subscription else 0,
                 "valid_till": active_subscription.end_date.isoformat() if active_subscription and active_subscription.end_date else None
             }
 
-            attempts = list(QuizAttempt.objects(user=user.id).only('user','quiz','questions','user_answers','score', 'topics', 'difficulty', 'question_type', 'created_at', 'number_question').order_by('-created_at').limit(50))
-            saved_quizzes = list(Quiz.objects(user=user.id).only('user','questions', 'number_question', 'question_type', 'content_type', 'topics', 'title', 'difficulty', 'created_at').order_by('-created_at').limit(10))
+            # Quiz Attempts and Saved Quizzes
+            attempts = list(QuizAttempt.objects(user=user.id).only('user','quiz','score', 'topics', 'difficulty', 'question_type', 'created_at', 'number_question','questions','user_answers').order_by('-created_at')[:50])
+            saved_quizzes = list(Quiz.objects(user=user.id).only('user','questions','number_question','question_type','title', 'topics', 'difficulty', 'content_type', 'created_at').order_by('-created_at')[:10])
 
-            user_total_score = sum(float(a.score or 0) for a in attempts)
-
-            played_dates = sorted({a.created_at.date() for a in attempts if a.created_at}, reverse=True)
-            streak = 0
-            today = datetime.utcnow().date()
-            for i, date in enumerate(played_dates):
-                if (today - timedelta(days=i)) == date:
-                    streak += 1
-                else:
-                    break
-
+            user_total_score = 0
+            played_dates = set()
             topic_errors = {}
-            for a in attempts:
-                incorrect = (a.number_question or 0) - (a.score or 0)
-                for topic in a.topics or []:
-                    topic_errors[topic] = topic_errors.get(topic, 0) + incorrect
-            weak_topics = sorted(topic_errors.items(), key=lambda x: x[1], reverse=True)[:5]
-
             performance_graph = {}
-            for a in attempts:
-                if a.created_at and a.score is not None:
-                    key = a.created_at.strftime('%Y-%m-%d')
-                    performance_graph[key] = performance_graph.get(key, 0) + float(a.score)
-
             difficulty_stats = {'easy': 0, 'medium': 0, 'hard': 0}
             question_type_stats = {'mcq': 0, 'true_false': 0}
+
+            today = datetime.utcnow().date()
+
             for a in attempts:
+                score = float(a.score or 0)
+                user_total_score += score
+
+                if a.created_at:
+                    date_played = a.created_at.date()
+                    played_dates.add(date_played)
+
+                    key = a.created_at.strftime('%Y-%m-%d')
+                    performance_graph[key] = performance_graph.get(key, 0) + score
+
+                incorrect = (a.number_question or 0) - score
+                for topic in a.topics or []:
+                    topic_errors[topic] = topic_errors.get(topic, 0) + incorrect
+
                 if a.difficulty in difficulty_stats:
                     difficulty_stats[a.difficulty] += 1
                 if a.question_type in question_type_stats:
                     question_type_stats[a.question_type] += 1
 
-            return Response({
+            # Streak Calculation
+            streak = 0
+            for i in range(100):  # Safe upper limit
+                if (today - timedelta(days=i)) in played_dates:
+                    streak += 1
+                else:
+                    break
+
+            weak_topics = sorted(topic_errors.items(), key=lambda x: x[1], reverse=True)[:5]
+
+            response_data = {
                 'status': 1,
                 'user_id': str(user.id),
                 'full_name': user.full_name,
@@ -150,13 +166,17 @@ class UserDashboardView(APIView):
                     'by_difficulty': difficulty_stats,
                     'by_question_type': question_type_stats
                 }
-            }, status=200)
+            }
+
+            # Cache it for 60 seconds
+            cache.set(cache_key, response_data, timeout=60)
+
+            return Response(response_data, status=200)
 
         except AuthToken.DoesNotExist:
             return Response({'status': 0, 'error': 'Invalid token'}, status=401)
         except Exception as e:
             return Response({'status': 0, 'error': str(e)}, status=500)
-        
 class UserUpdateView(APIView):
      def post(self, request, pk):
         try:
