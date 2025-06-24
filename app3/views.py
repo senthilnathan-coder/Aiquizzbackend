@@ -72,7 +72,7 @@ class AdminDashboardView(APIView):
             }
 
             # === User Stats ===
-            users = User.objects(role='user').only('id', 'full_name', 'email')
+            users = User.objects(role='user').only('id', 'full_name', 'email','created_at','last_login')
             user_ids = [u.id for u in users]
             attempt_map = {}
             for a in QuizAttempt.objects(user__in=user_ids).only('user', 'score'):
@@ -91,7 +91,9 @@ class AdminDashboardView(APIView):
                     'full_name': u.full_name,
                     'email': u.email,
                     'total_attempts': len(scores),
-                    'total_score': sum(scores)
+                    'total_score': sum(scores),
+                    'created_at':u.created_at,
+                    'last_login':u.last_login
                 })
 
             # === Subscriptions ===

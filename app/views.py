@@ -168,24 +168,25 @@ class MultimodalQuizView(APIView):
             if user.role != 'user':
                 return Response({'status': 0, 'error': 'Access denied: not a user'}, status=403)
 
-            # subscription = UserSubscription.objects(user=user.id, is_active=True).order_by('-start_date').first()
+            subscription = UserSubscription.objects(user=user.id, is_active=True).order_by('-start_date').first()
 
-            # if not subscription:
-            #     return Response({'error': 'No active subscription found'}, status=403)
+            if not subscription:
+                return Response({'error': 'No active subscription found'}, status=403)
 
-            # # Step 2: Check if subscription is expired
-            # if subscription.end_date and subscription.end_date < datetime.utcnow():
-            #     subscription.is_active = False
-            #     subscription.save()
-            #     return Response({'error': 'Subscription has expired'}, status=403)
-            # if subscription.remaining_credits <= 0:
-            #     return Response({'error': 'No remaining quiz credits'}, status=403)
+             # Step 2: Check if subscription is expired
+            if subscription.end_date and subscription.end_date < datetime.utcnow():
+                subscription.is_active = False
+                subscription.save()
+                return Response({'error': 'Subscription has expired'}, status=403)
+            if subscription.remaining_credits <= 0:
+                 return Response({'error': 'No remaining quiz credits'}, status=403)
 
             data, files = request.data, request.FILES
             content_text = data.get('text', '').strip()
             url = data.get('url')
-            difficulty = data.get('difficulty', 'medium')
-            question_type = data.get('question_type', 'both')
+            difficulty = data.get('difficulty', 'medium').lower()
+            question_type = data.get('question_type', 'both').lower()
+            language=data.get('language','en')
             number_question = int(data.get('number_question', 10))
 
             if not (1 <= number_question <= 25):
@@ -193,15 +194,21 @@ class MultimodalQuizView(APIView):
 
             if not any([content_text, *files.values(), url]):
                 return Response({'error': 'No input content'}, status=status.HTTP_400_BAD_REQUEST)
+            language_map={
+                 'en':'English','ta':'தமிழ்','hi':'हिन्दी','za':'Afrikaans','de':'Deutsch','es': 'Español',
+                 'ph': 'Filipino','fr':'Français','it': 'Italiano','tr': 'Turkish','ru': 'Русский','ae':'العربية','jp': '日本語','kr': '한국어',  
+            }
+            lang_name=language_map.get(language,language.lower())
 
             prompt_base = (
                 f"You are an AI quiz generator. Your task is to generate exactly {number_question} quiz questions "
                 f"based on the content provided. The difficulty level should be '{difficulty}'.\n\n"
                 "Rules you must follow:\n"
                 f"1. You MUST generate exactly {number_question} questions. No more, no less.\n"
-                "2. Number each question clearly as Q1, Q2, ..., Q{number_question}.\n"
+                f"2. Number each question exactly as Q1, Q2, ..., Q{number_question} using 'Q<number>:'.\n"
                 "3. Do not include explanations, just questions, options, and answers.\n"
                 "4. Use the exact format as shown below.\n"
+                f"5. Language of quiz must be strictly {lang_name}.\n"
             )
 
             if question_type == "mcq":
@@ -259,7 +266,8 @@ class MultimodalQuizView(APIView):
 
             response = genai.GenerativeModel("models/gemini-1.5-flash").generate_content(parts)
             questions = parse_questions(response.text, question_type, limit=number_question)
-
+            
+            
             if not questions or len(questions) < number_question:
                 return Response({
                     'error': f'Only {len(questions)} out of {number_question} questions were generated. Try different content or lower difficulty.'
@@ -281,8 +289,8 @@ class MultimodalQuizView(APIView):
             if serializer.is_valid():
                 quiz = serializer.save()
                 
-                # subscription.remaining_credits -= 1
-                # subscription.save()
+                subscription.remaining_credits -= 1
+                subscription.save()
             else:
                 return Response({'message': 'Invalid quiz data'}, status=400)
             
@@ -365,9 +373,7 @@ class SubmitQuizView(APIView):
                     'score': score,
                     'total_questions': len(quiz.questions),
                     'correct_answers': correct_count,
-                    'quiz_attempt_id': str(attempt.id),
-
-                    
+                    'quiz_attempt_id': str(attempt.id),    
                 })
             else:
                 return Response({
