@@ -16,11 +16,16 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path,include
-
+from rest_framework.response import Response
+from rest_framework.views import APIView
+class Apicheck(APIView):
+    def get(self,request):
+        return Response({'message':'API is running succussfully'})
 
 
 urlpatterns = [
     # path('admin/', admin.site.urls),
+    path('',Apicheck.as_view(),name='api_check'),
     path('app/',include('app.urls')),
     path('app2/',include('app2.urls')),
     path('app3/',include('app3.urls')),
