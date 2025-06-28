@@ -142,25 +142,41 @@ def parse_questions(response_text, question_type='both', limit=25):
 
 
 class MultimodalQuizView(APIView):
+    def get(self, request, pk):
+        try:
+            User.objects.get(id=pk)
+            return Response({
+                'message': 'POST with content to generate quiz',
+                'supported_content_types': ['text', 'image', 'audio', 'video', 'pdf', 'word', 'ppt', 'excel', 'url'],
+                'difficulty_levels': ['easy', 'medium', 'hard'],
+                'question_types': ['mcq', 'true_false']
+            })
+        except User.DoesNotExist:
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
     def post(self, request, pk):
         token_key = request.data.get('token')
         if not token_key:
             return Response({'status': 0, 'error': 'Token is required'}, status=400)
 
         try:
-            token = AuthToken.objects.get(token=token_key, user=pk)
+            token = AuthToken.objects.only('token', 'user', 'expires_at').get(token=token_key, user=pk)
             if token.expires_at < datetime.utcnow():
-                return Response({'error': 'Token expired'}, status=status.HTTP_401_UNAUTHORIZED)
+                return Response({'error': 'Token expired'}, status=401)
 
             user = token.user
             if user.role != 'user':
-                return Response({'status': 0, 'error': 'Access denied'}, status=403)
+                return Response({'status': 0, 'error': 'Access denied: not a user'}, status=403)
 
             subscription = UserSubscription.objects(user=user.id, is_active=True).order_by('-start_date').first()
-            if not subscription or subscription.remaining_credits <= 0:
-                return Response({'error': 'No valid subscription or no credits'}, status=403)
+            if not subscription or (subscription.end_date and subscription.end_date < datetime.utcnow()):
+                if subscription:
+                    subscription.is_active = False
+                    subscription.save()
+                return Response({'error': 'No active or expired subscription'}, status=403)
+            if subscription.remaining_credits <= 0:
+                return Response({'error': 'No remaining quiz credits'}, status=403)
 
-            # Extract input
             data, files = request.data, request.FILES
             content_text = data.get('text', '').strip()
             url = data.get('url')
@@ -174,38 +190,50 @@ class MultimodalQuizView(APIView):
             if not any([content_text, *files.values(), url]):
                 return Response({'error': 'No input content'}, status=400)
 
-            # Language map
             language_map = {
                 'en': 'English', 'ta': 'தமிழ்', 'hi': 'हिन्दी', 'za': 'Afrikaans', 'de': 'Deutsch',
                 'es': 'Español', 'ph': 'Filipino', 'fr': 'Français', 'it': 'Italiano', 'tr': 'Turkish',
-                'ru': 'Русский', 'ae': 'العربية', 'jp': '日本語', 'kr': '한국어',
+                'ru': 'Русский', 'ae': 'العربية', 'jp': '日本語', 'kr': '한국어', 'ms': 'Malay'
             }
             lang_name = language_map.get(language, language.lower())
 
-            # Build prompt
-            prompt = (
+            prompt_base = (
                 f"You are an AI quiz generator. Your task is to generate exactly {number_question} quiz questions "
                 f"based on the content provided. The difficulty level should be '{difficulty}'.\n\n"
-                f"Rules:\n1. Exactly {number_question} questions\n2. Q<number> format\n"
-                f"3. No explanations\n4. Language: {lang_name}\n"
+                "Rules you must follow:\n"
+                f"1. You MUST generate exactly {number_question} questions. No more, no less.\n"
+                f"2. Number each question exactly as Q1, Q2, ..., Q{number_question} using 'Q<number>:'.\n"
+                "3. Do not include explanations, just questions, options, and answers.\n"
+                "4. Use the exact format as shown below.\n"
+                f"5. Language of quiz must be strictly {lang_name}.\n"
             )
 
             if question_type == "mcq":
-                prompt += (
-                    "Format:\nTopic: <topic>\nQ1: <question>\nA. <option>\nB. <option>\nC. <option>\nD. <option>\nAnswer: <A/B/C/D>\n..."
+                prompt_base += (
+                    "All questions must be Multiple Choice Questions (MCQs).\n"
+                    "Format:\n"
+                    "Topic: <topic>\n"
+                    "Q1: <question text>\nA. <option>\nB. <option>\nC. <option>\nD. <option>\nAnswer: <correct option letter>\n...\n"
                 )
             elif question_type == "true_false":
-                prompt += "Format:\nTopic: <topic>\nQ1: <question>\nAnswer: True/False\n..."
+                prompt_base += (
+                    "All questions must be True or False.\n"
+                    "Format:\n"
+                    "Topic: <topic>\n"
+                    "Q1: <question text>\nAnswer: True/False\n...\n"
+                )
             else:
-                prompt += (
-                    "Format: Mix of MCQ and True/False...\nTopic: <topic>\n"
-                    "Q1: <question>\nA. ...\nB. ...\nAnswer: A\nQ2: <question>\nAnswer: True\n..."
+                prompt_base += (
+                    "Mix both MCQ and True/False questions.\n"
+                    "Format:\n"
+                    "Topic: <topic>\n"
+                    "MCQ:\nQ1: <question>\nA. <option>\nB. <option>\nC. <option>\nD. <option>\nAnswer: <correct option letter>\n"
+                    "True/False:\nQ2: <question>\nAnswer: True/False\n...\n"
                 )
 
-            prompt += f"\n\nText: {content_text}\n"
+            prompt = prompt_base + f"\n\nText: {content_text}\n"
             parts = [{"text": prompt}]
 
-            # Extract other content types
             for label, field, extractor in [
                 ("audio", 'audio', transcribe_audio),
                 ("pdf", 'pdf', extract_pdf_text),
@@ -214,11 +242,18 @@ class MultimodalQuizView(APIView):
                 ("excel", 'excel', extract_excel_text),
             ]:
                 if files.get(field):
-                    text = extract_text(files[field], extractor)
-                    parts.append({"text": f"{label} content: {text}"})
+                    try:
+                        text = extract_text(files[field], extractor)
+                        parts.append({"text": f"Additional context from {label}: {text}"})
+                    except Exception as e:
+                        return Response({'error': f'{label} extraction failed: {str(e)}'}, status=400)
 
             if url:
-                parts.append({"text": f"URL content: {extract_url_text(url)}"})
+                try:
+                    text = extract_url_text(url)
+                    parts.append({"text": f"Extracted from URL: {text}"})
+                except Exception as e:
+                    return Response({'error': f'URL error: {str(e)}'}, status=400)
 
             if image := files.get('image'):
                 parts.append({"inline_data": {"mime_type": image.content_type, "data": base64.b64encode(image.read()).decode()}})
@@ -226,59 +261,54 @@ class MultimodalQuizView(APIView):
                 frame, mime = extract_frame(video)
                 parts.append({"inline_data": {"mime_type": mime, "data": base64.b64encode(frame).decode()}})
 
-            # Define quiz response variable for later use
-            response_data = {}
+            response = genai.GenerativeModel("models/gemini-2.5-flash").generate_content(parts)
+            questions = parse_questions(response.text, question_type, limit=number_question)
 
-            def generate_quiz():
-                nonlocal response_data
-                try:
-                    response = genai.GenerativeModel("models/gemini-1.5-flash").generate_content(parts)
-                    questions = parse_questions(response.text, question_type, limit=number_question)
-                    if not questions or len(questions) < number_question:
-                        response_data = {'error': 'Insufficient questions generated'}, 400
-                        return
+            if not questions or len(questions) < number_question:
+                return Response({
+                    'error': f'Only {len(questions)} out of {number_question} questions were generated. Try different content or lower difficulty.'
+                }, status=400)
 
-                    topic = questions[0].get('topic', 'General')
-                    quiz_data = {
-                        'user': str(user.id),
-                        'title': f"Quiz on {topic}",
-                        'questions': questions,
-                        'number_question': len(questions),
-                        'difficulty': difficulty,
-                        'question_type': question_type,
-                        'content_type': [k for k in ['text', 'image', 'audio', 'video', 'pdf', 'word', 'ppt', 'excel', 'url'] if data.get(k) or files.get(k)],
-                        'topics': [topic]
-                    }
+            topic = questions[0].get('topic', 'general')
+            quiz_data = {
+                'user': str(user.id),
+                'title': f"Quiz on {topic}",
+                'questions': questions,
+                'number_question': len(questions),
+                'difficulty': difficulty,
+                'question_type': question_type,
+                'content_type': [k for k in ['text', 'image', 'audio', 'video', 'pdf', 'word', 'ppt', 'excel', 'url'] if data.get(k) or files.get(k)],
+                'topics': [topic]
+            }
 
-                    serializer = QuizSerializer(data=quiz_data)
-                    if serializer.is_valid():
-                        quiz = serializer.save()
-                        subscription.remaining_credits -= 1
-                        subscription.save()
+            serializer = QuizSerializer(data=quiz_data)
+            if serializer.is_valid():
+                quiz = serializer.save()
+                subscription.remaining_credits -= 1
+                subscription.save()
+            else:
+                return Response({'message': 'Invalid quiz data'}, status=400)
 
-                        response_data = ({
-                            'message': 'Quiz generated',
-                            'user_id': str(user.id),
-                            'quiz_id': str(quiz.id),
-                            'topics': topic,
-                            'questions': [
-                                {'question': q['question'], 'options': q['options'], 'answer': q['answer']}
-                                for q in questions
-                            ]
-                        }, 200)
-                    else:
-                        response_data = {'error': 'Invalid quiz data'}, 400
+            # ✅ Flashcard generation
+            flashcard_prompt = (
+                f"Generate a list of flashcards for the topic of \"{topic}\". "
+                "Each flashcard should have a term and a concise definition. "
+                "Format the output as a list of \"Term: Definition\" pairs, one per line. "
+                f"Language must be {lang_name} only. Return only the list."
+            )
+            flashcard_parts = [{"text": flashcard_prompt}]
+            flashcard_response = genai.GenerativeModel("models/gemini-2.5-flash").generate_content(flashcard_parts)
+            flashcard_text = flashcard_response.text or ""
 
-                except Exception as e:
-                    response_data = {'error': str(e)}, 500
-
-            # Start and join thread (wait for completion but doesn't block request loop excessively)
-            thread = threading.Thread(target=generate_quiz)
-            thread.start()
-            thread.join(timeout=60)
-
-            # Return result
-            return Response(*response_data)
+            return Response({
+                'message': 'Quiz generated',
+                'user_id': str(user.id),
+                'quiz_id': str(quiz.id),
+                'topics': topic,
+                'questions': [{'question': q['question'], 'options': q['options'], 'answer': q['answer']} for q in questions],
+                'flashcards': flashcard_text.strip(),
+                'remaining_credits': subscription.remaining_credits
+            })
 
         except Exception as e:
             return Response({'error': str(e)}, status=500)
