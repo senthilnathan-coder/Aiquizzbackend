@@ -6,4 +6,5 @@ urlpatterns = [
     path('plans/', ListSubscriptionPlansView.as_view(),name='plans'),
     path('payment/create/', CreateSubscriptionOrderView.as_view(),name='payment_create'),
     path('payment/verify/', VerifySubscriptionPaymentView.as_view(),name='payment_verify'),
+    path('remaining_credits/',CreditsView.as_view(),name='remaining_credits')
 ]

@@ -201,7 +201,7 @@ class CreateSubscriptionOrderView(APIView):
                 if UserSubscription.objects(user=user, plan=plan).first():
                     return Response({'error': 'Trial plan already used'}, status=403)
 
-                UserSubscription.objects(user=user, is_active=True).update(set__is_active=False)
+                UserSubscription.objects(user=user, is_active=True).update(set__is_active=False)   
 
                 start = datetime.utcnow()
                 end = start + timedelta(days=plan.duration_days)
@@ -272,7 +272,7 @@ class CreateSubscriptionOrderView(APIView):
                 "key_id": settings.RAZORPAY_KEY_ID,
                 "plan_name": plan.name,
                 "subscription_id": str(subscription.id)
-            })
+            },status=200)
 
         except AuthToken.DoesNotExist:
             return Response({'error': 'Invalid token'}, status=403)
@@ -298,12 +298,12 @@ class VerifySubscriptionPaymentView(APIView):
             msg = f"{order_id}|{payment_id}".encode()
             expected_signature = hmac.new(key_secret, msg, hashlib.sha256).hexdigest()
             
-            if not settings.DEBUG:
-                if not hmac.compare_digest(expected_signature, signature):
-                    return Response({'error': 'Invalid payment signature'}, status=400)
+            # if not settings.DEBUG:
+            #     if not hmac.compare_digest(expected_signature, signature):
+            #         return Response({'error': 'Invalid payment signature'}, status=400)
 
-            # if expected_signature != signature:
-            #     return Response({'error': 'Invalid payment signature'}, status=400)
+            if expected_signature != signature:
+                return Response({'error': 'Invalid payment signature'}, status=400)
 
             # Deactivate any existing subscriptions for the user
             UserSubscription.objects(user=subscription.user, is_active=True).update(set__is_active=False)
@@ -323,9 +323,53 @@ class VerifySubscriptionPaymentView(APIView):
                 'plan': subscription.plan.name,
                 'credits': subscription.remaining_credits,
                 'valid_till': subscription.end_date.isoformat()
-            })
+            },status=200)
 
         except UserSubscription.DoesNotExist:
             return Response({'error': 'Subscription not found'}, status=404)
         except Exception as e:
             return Response({'error': str(e)}, status=500)
+        
+class CreditsView(APIView):
+    def post(self,request):
+        user_id = request.data.get('user_id')
+        token = request.data.get('token')
+
+        if not user_id or not token:
+            return Response({'status': 0, 'error': 'user_id and token are required'}, status=400)
+
+        try:
+            token_obj = AuthToken.objects.get(token=token)
+            if str(token_obj.user.id) != str(user_id):
+                return Response({'status': 0, 'error': 'Token does not match user_id'}, status=403)
+
+            user = token_obj.user
+
+            # Get the latest active subscription
+            subscription = UserSubscription.objects(user=user, is_active=True).order_by('-start_date').first()
+
+            if not subscription:
+                return Response({'status': 0, 'error': 'No active subscription found'}, status=404)
+
+            if subscription.end_date and subscription.end_date < datetime.utcnow():
+                subscription.is_active = False
+                subscription.save()
+                return Response({'status': 0, 'error': 'Subscription has expired'}, status=403)
+
+            return Response({
+                'status': 1,
+                'user_id': str(user.id),
+                'remaining_credits': subscription.remaining_credits,
+                'valid_till': subscription.end_date.isoformat() if subscription.end_date else None,
+                'plan': subscription.plan.name
+            })
+
+        except AuthToken.DoesNotExist:
+            return Response({'status': 0, 'error': 'Invalid token'}, status=401)
+        except Exception as e:
+            return Response({'status': 0, 'error': str(e)}, status=500)
+            
+                
+ 
+           
+           
