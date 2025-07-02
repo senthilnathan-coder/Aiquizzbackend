@@ -30,5 +30,6 @@ urlpatterns = [
     path('app2/',include('app2.urls')),
     path('app3/',include('app3.urls')),
     path('payments/',include('payments.urls')),
-    path('flashcard/',include('flashcard.urls'))
+    path('flashcard/',include('flashcard.urls')),
+ 
 ]

@@ -142,7 +142,7 @@ def parse_questions(response_text, question_type='both', limit=25):
 
 
 class MultimodalQuizView(APIView):
-    def get(self, request, pk):
+    def get(self, request, pk):             
         try:
             User.objects.get(id=pk)
             return Response({
@@ -289,16 +289,6 @@ class MultimodalQuizView(APIView):
             else:
                 return Response({'message': 'Invalid quiz data'}, status=400)
 
-            # ✅ Flashcard generation
-            flashcard_prompt = (
-                f"Generate a list of flashcards for the topic of \"{topic}\". "
-                "Each flashcard should have a term and a concise definition. "
-                "Format the output as a list of \"Term: Definition\" pairs, one per line. "
-                f"Language must be {lang_name} only. Return only the list."
-            )
-            flashcard_parts = [{"text": flashcard_prompt}]
-            flashcard_response = genai.GenerativeModel("models/gemini-2.5-flash").generate_content(flashcard_parts)
-            flashcard_text = flashcard_response.text or ""
 
             return Response({
                 'message': 'Quiz generated',
@@ -306,7 +296,6 @@ class MultimodalQuizView(APIView):
                 'quiz_id': str(quiz.id),
                 'topics': topic,
                 'questions': [{'question': q['question'], 'options': q['options'], 'answer': q['answer']} for q in questions],
-                'flashcards': flashcard_text.strip(),
                 'remaining_credits': subscription.remaining_credits
             })
 

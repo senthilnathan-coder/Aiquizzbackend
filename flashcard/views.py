@@ -13,9 +13,12 @@ class FlashcardView(APIView):
         token_key = request.data.get('token')
         topic = request.data.get('topic', '').strip()
         language=request.data.get('language','en')
+        number_flashcard=int(request.data.get('number_flashcard',10))
 
         if not token_key or not topic:
             return Response({'error': 'Token and topic are required'}, status=400)
+        if not (1 <= number_flashcard <=25):
+            return Response({'error': 'number_flashcard must be between 1 and 25'}, status=400)
 
         try:
             token = AuthToken.objects.only('token', 'user', 'expires_at').get(token=token_key, user=pk)
@@ -25,7 +28,7 @@ class FlashcardView(APIView):
             user = token.user
             if user.role != 'user':
                 return Response({'error': 'Access denied: not a user'}, status=403)
-
+            
             subscription = UserSubscription.objects(user=user.id, is_active=True).order_by('-start_date').first()
             if not subscription:
                 return Response({'error': 'No active subscription found'}, status=403)
@@ -43,35 +46,41 @@ class FlashcardView(APIView):
             lang_name = language_map.get(language, language.lower())
 
             prompt = (
-                f"Generate exactly 10 flashcards for the topic {topic}. Each should be in the format: Term: Definition. One per line."
-                "Format the output as a list of \"Term: Definition\" pairs, with each pair on a new line. "
-                "Ensure terms and definitions are distinct and clearly separated by a single colon.\n"
-                "Example:\nWater: A colorless, transparent, odorless liquid\nOxygen: A gas essential for respiration"
-                f"Language of flashcards must be strictly {lang_name}.\n"
+                f"Generate exactly {number_flashcard} flashcards for the topic \"{topic}\". "
+                f"Each should be in the format: Term: Definition. One per line.\n"
+                f"Ensure terms and definitions are distinct and clearly separated by a single colon.\n"
+                f"Example:\nWater: A colorless, transparent, odorless liquid\nOxygen: A gas essential for respiration\n"
+                f"Language of flashcards must be strictly {lang_name}."
             )
+            if subscription.plan.name.upper() != 'TRIAL':
+                model = genai.GenerativeModel("models/gemini-2.5-flash")
+                result = model.generate_content(prompt)
 
-            model = genai.GenerativeModel("models/gemini-2.5-flash")
-            result = model.generate_content(prompt)
+                flashcards = []
+                lines = result.text.strip().split("\n")
+                for line in lines:
+                    if ":" in line:
+                        term, definition = map(str.strip, line.split(":", 1))
+                        if term and definition:
+                            flashcards.append({'term': term, 'definition': definition})
 
-            flashcards = []
-            lines = result.text.strip().split("\n")
-            for line in lines:
-                if ":" in line:
-                    term, definition = map(str.strip, line.split(":", 1))
-                    if term and definition:
-                        flashcards.append({'term': term, 'definition': definition})
+                if not flashcards:
+                    return Response({'error': 'No valid flashcards generated'}, status=400)
 
-            if not flashcards:
-                return Response({'error': 'No valid flashcards generated'}, status=400)
+                flashcards = flashcards[:number_flashcard]
 
-            subscription.update(dec__remaining_credits=1)
+                subscription.remaining_credits -= 1
+                subscription.save()
 
-            return Response({
-                'message': 'Flashcards generated',
-                'topic': topic,
-                'flashcards': flashcards,
-                'remaining_credits': subscription.remaining_credits - 1
-            })
+                return Response({
+                    'message': 'Flashcards generated',
+                    'topic': topic,
+                    'flashcards': flashcards,
+                    'remaining_credits': subscription.remaining_credits
+                })
+            else:
+                return Response({'error': 'Flashcard generation is not available for TRIAL plan'}, status=400)
+          
 
         except Exception as e:
             return Response({'error': str(e)}, status=500)
