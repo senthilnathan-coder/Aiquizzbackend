@@ -298,12 +298,12 @@ class VerifySubscriptionPaymentView(APIView):
             msg = f"{order_id}|{payment_id}".encode()
             expected_signature = hmac.new(key_secret, msg, hashlib.sha256).hexdigest()
             
-            # if not settings.DEBUG:
-            #     if not hmac.compare_digest(expected_signature, signature):
-            #         return Response({'error': 'Invalid payment signature'}, status=400)
+            if not settings.DEBUG:
+                if not hmac.compare_digest(expected_signature, signature):
+                    return Response({'error': 'Invalid payment signature'}, status=400)
 
-            if expected_signature != signature:
-                return Response({'error': 'Invalid payment signature'}, status=400)
+            # if expected_signature != signature:
+            #     return Response({'error': 'Invalid payment signature'}, status=400)
 
             # Deactivate any existing subscriptions for the user
             UserSubscription.objects(user=subscription.user, is_active=True).update(set__is_active=False)
