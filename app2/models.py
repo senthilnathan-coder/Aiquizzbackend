@@ -14,6 +14,7 @@ class User(Document):
     phone_number = StringField(required=True, unique=True)
     email = EmailField(required=True, unique=True)
     password = StringField(required=True)
+    auth_provider = StringField(choices=('email', 'google', 'facebook'), default='email')
     
     is_active = BooleanField(default=False)
     role = StringField(choices=('admin', 'user'), default='user')

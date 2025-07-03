@@ -8,35 +8,96 @@ from django.core.mail import send_mail
 from django.conf import settings
 from mongoengine.errors import DoesNotExist, ValidationError
 from django.core.files.storage import default_storage
-import time
+from datetime import datetime
 from payments.models import *
 from django.core.cache import cache
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
+import secrets
+import string
 
 class LoginView(APIView):
+
+    @staticmethod
+    def generate_random_password(length=12):
+        chars = string.ascii_letters + string.digits
+        return ''.join(secrets.choice(chars) for _ in range(length))
+
     def post(self, request):
         email = request.data.get('email')
         password = request.data.get('password')
+        oauth_token = request.data.get('google_id_token')  # Optional Google token
 
+        # === OAuth Login ===
+        if oauth_token:
+            try:
+                # ✅ Validate Google token
+                idinfo = id_token.verify_oauth2_token(oauth_token, google_requests.Request())
+                email = idinfo.get('email')
+                full_name = idinfo.get('name', email.split('@')[0])
+
+                if not email:
+                    return Response({'status': 0, 'error': 'OAuth token missing email'}, status=400)
+
+                # ✅ Lookup or create user
+                user = User.objects(email=email).first()
+                if not user:
+                    user = User(
+                        email=email,
+                        full_name=full_name,
+                        is_verified=True,  # Google accounts are trusted
+                        auth_provider='google',
+                        role='user',
+                    )
+                    user.set_password(self.generate_random_password())
+                    user.save()
+                else:
+                    if not user.auth_provider:
+                        user.auth_provider = 'google'
+                        user.save()
+
+                if not user.is_verified:
+                    return Response({'status': 0, 'error': 'User not verified'}, status=403)
+
+                user.last_login = datetime.utcnow()
+                user.save()
+
+                AuthToken.objects(user=user).delete()
+                token = AuthToken.generate_token(user)
+
+                return Response({
+                    'status': 1,
+                    'message': 'Login successful via Google',
+                    'full_name': user.full_name,
+                    'user_id': str(user.id),
+                    'token': token.token,
+                    'role': user.role
+                }, status=200)
+
+            except Exception as e:
+                return Response({'status': 0, 'error': f'Invalid OAuth token: {str(e)}'}, status=401)
+
+        # === Regular Email/Password Login ===
         if not email or not password:
-            return Response({'status': 0, 'error': 'Email and password are required'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'status': 0, 'error': 'Email and password are required'}, status=400)
 
         try:
             user = User.objects.get(email=email)
 
             if not user.is_verified:
-                return Response({'status': 0, 'error': 'Email not verified. Please verify to continue.'}, status=status.HTTP_403_FORBIDDEN)
+                return Response({'status': 0, 'error': 'Email not verified'}, status=403)
+
+            if user.auth_provider != 'email':
+                return Response({'status': 0, 'error': f'Login restricted to {user.auth_provider} sign-in'}, status=403)
 
             if not user.check_password(password):
-                return Response({'status': 0, 'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+                return Response({'status': 0, 'error': 'Invalid credentials'}, status=401)
 
             user.last_login = datetime.utcnow()
             user.save()
-        
-            # Remove old token(s)
-            AuthToken.objects(user=user).delete()
-            # Generate new token
-            token = AuthToken.generate_token(user)
 
+            AuthToken.objects(user=user).delete()
+            token = AuthToken.generate_token(user)
 
             return Response({
                 'status': 1,
@@ -45,12 +106,12 @@ class LoginView(APIView):
                 'user_id': str(user.id),
                 'token': token.token,
                 'role': user.role
-            }, status=status.HTTP_200_OK)
+            }, status=200)
 
         except User.DoesNotExist:
-            return Response({'status': 0, 'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response({'status': 0, 'error': 'Invalid credentials'}, status=401)
         except Exception as e:
-            return Response({'status': 0, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'status': 0, 'error': str(e)}, status=500)
 
 
 class FeedbackView(APIView):
