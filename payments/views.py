@@ -201,8 +201,6 @@ class CreateSubscriptionOrderView(APIView):
                 if UserSubscription.objects(user=user, plan=plan).first():
                     return Response({'error': 'Trial plan already used'}, status=403)
 
-                UserSubscription.objects(user=user, is_active=True).update(set__is_active=False)   
-
                 start = datetime.utcnow()
                 end = start + timedelta(days=plan.duration_days)
                 credits = get_initial_credits(plan.name)
@@ -242,7 +240,6 @@ class CreateSubscriptionOrderView(APIView):
 
             # === Razorpay Order Creation ===
             amount_in_paise = int(total_price * 100)
-
             client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
             razorpay_order = client.order.create({
                 "amount": amount_in_paise,
@@ -250,8 +247,7 @@ class CreateSubscriptionOrderView(APIView):
                 "payment_capture": 1
             })
 
-            # Save subscription as pending
-            UserSubscription.objects(user=user, is_active=True).update(set__is_active=False)
+            # Save subscription as pending (not active yet)
             subscription = UserSubscription.objects.create(
                 user=user,
                 plan=plan,
@@ -272,7 +268,7 @@ class CreateSubscriptionOrderView(APIView):
                 "key_id": settings.RAZORPAY_KEY_ID,
                 "plan_name": plan.name,
                 "subscription_id": str(subscription.id)
-            },status=200)
+            }, status=200)
 
         except AuthToken.DoesNotExist:
             return Response({'error': 'Invalid token'}, status=403)
@@ -297,39 +293,54 @@ class VerifySubscriptionPaymentView(APIView):
             key_secret = settings.RAZORPAY_KEY_SECRET.encode()
             msg = f"{order_id}|{payment_id}".encode()
             expected_signature = hmac.new(key_secret, msg, hashlib.sha256).hexdigest()
-            
-            if not settings.DEBUG:
-                if not hmac.compare_digest(expected_signature, signature):
-                    return Response({'error': 'Invalid payment signature'}, status=400)
 
-            # if expected_signature != signature:
-            #     return Response({'error': 'Invalid payment signature'}, status=400)
+            if not settings.DEBUG and not hmac.compare_digest(expected_signature, signature):
+                return Response({'error': 'Invalid payment signature'}, status=400)
 
-            # Deactivate any existing subscriptions for the user
-            UserSubscription.objects(user=subscription.user, is_active=True).update(set__is_active=False)
+            user = subscription.user
+            credits_to_add = get_initial_credits(subscription.plan.name)
+            duration_to_add = timedelta(days=subscription.plan.duration_days)
 
-            # Set subscription metadata
-            subscription.razorpay_payment_id = payment_id
-            subscription.razorpay_signature = signature
-            subscription.start_date = datetime.utcnow()
-            subscription.end_date = subscription.start_date + timedelta(days=subscription.plan.duration_days)
-            subscription.remaining_credits = get_initial_credits(subscription.plan.name)
-            subscription.is_active = True
-            subscription.save()
+            active_sub = UserSubscription.objects(user=user, is_active=True).first()
+
+            if active_sub:
+                # Extend existing subscription
+                active_sub.remaining_credits += credits_to_add
+                active_sub.end_date += duration_to_add
+                active_sub.plan=subscription.plan
+                active_sub.save()
+
+                # Mark the new one as a paid history record
+                subscription.razorpay_payment_id = payment_id
+                subscription.razorpay_signature = signature
+                subscription.start_date = datetime.utcnow()
+                subscription.end_date = subscription.start_date + duration_to_add
+                subscription.remaining_credits = credits_to_add
+                subscription.is_active = False
+                subscription.save()
+            else:
+                # No active subscription, activate this one
+                subscription.razorpay_payment_id = payment_id
+                subscription.razorpay_signature = signature
+                subscription.start_date = datetime.utcnow()
+                subscription.end_date = subscription.start_date + duration_to_add
+                subscription.remaining_credits = credits_to_add
+                subscription.is_active = True
+                subscription.save()
 
             return Response({
                 'message': 'Subscription activated successfully',
-                'user_id': str(subscription.user.id),
+                'user_id': str(user.id),
                 'plan': subscription.plan.name,
-                'credits': subscription.remaining_credits,
-                'valid_till': subscription.end_date.isoformat()
-            },status=200)
+                'credits_added': credits_to_add,
+                'valid_till': (active_sub.end_date if active_sub else subscription.end_date).isoformat()
+            }, status=200)
 
         except UserSubscription.DoesNotExist:
             return Response({'error': 'Subscription not found'}, status=404)
         except Exception as e:
             return Response({'error': str(e)}, status=500)
-        
+
 class CreditsView(APIView):
     def post(self,request):
         user_id = request.data.get('user_id')
