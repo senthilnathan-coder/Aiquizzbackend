@@ -107,8 +107,8 @@ class UserDashboardView(APIView):
             }
 
             # Quiz Attempts and Saved Quizzes
-            attempts = list(QuizAttempt.objects(user=user.id).only('user','quiz','score', 'topics', 'difficulty', 'question_type', 'created_at', 'number_question','questions','user_answers').order_by('-created_at'))
-            saved_quizzes = list(Quiz.objects(user=user.id).only('user','questions','number_question','question_type','title', 'topics', 'difficulty', 'content_type', 'created_at').order_by('-created_at'))
+            attempts = list(QuizAttempt.objects(user=user.id).only('user','quiz','score', 'topics', 'difficulty', 'question_type', 'created_at', 'number_question','questions','user_answers').order_by('-created_at'))[:100]
+            saved_quizzes = list(Quiz.objects(user=user.id).only('user','questions','number_question','question_type','title', 'topics', 'difficulty', 'content_type', 'created_at').order_by('-created_at'))[:100]
 
             user_total_score = 0
             played_dates = set()
