@@ -332,7 +332,7 @@ class VerifySubscriptionPaymentView(APIView):
                 'message': 'Subscription activated successfully',
                 'user_id': str(user.id),
                 'plan': subscription.plan.name,
-                'credits_added': credits_to_add,
+                'credits': credits_to_add,
                 'valid_till': (active_sub.end_date if active_sub else subscription.end_date).isoformat()
             }, status=200)
 
